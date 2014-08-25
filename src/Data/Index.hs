@@ -1,4 +1,3 @@
-
 {- | The indices supplied by this module are static type and value-level linked lists (which is not a concern due to unapologetic inlining of the functions operating on them, which, due to their small static nature, does not cause a code explosion).
 
 Indices look like @ x:.y:.Z :: i:.j:.Z @. The value is the actual index used, and the type is the upper-bound on that index.
