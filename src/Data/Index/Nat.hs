@@ -1,11 +1,17 @@
-{-# LANGUAGE UndecidableInstances, IncoherentInstances #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE IncoherentInstances #-} -- sorry :(
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Data.Index.Nat (CNat(..)) where
 import GHC.TypeLits as TypeLits
 
 genCNats :: Int -> String
 genCNats = unlines . map (gen . show) . enumFromTo 0
   where
-    gen i = "instance CNat " ++ i ++ " where { {-# INLINE cnat #-}; cnat _ = " ++ i ++ "}"
+    gen i = "instance CNat " ++ i ++ " where { {-# INLINE cnat #-}; cnat _ = "
+            ++ i ++ "}"
 
 genNats :: Int -> String
 genNats = unlines . map (gen . show) . enumFromTo 0
@@ -17,11 +23,16 @@ genNats = unlines . map (gen . show) . enumFromTo 0
          ++ name ++ " :: proxy " ++ i ++ "; "
          ++ name ++ " = undefined"
 
--- | CNat stands for /cheap nat/.
+-- | CNat stands for /cheap 'Nat'/.
 -- 
--- This exists because of GHC not being able to evaluate 'Integer' expressions very well at compile-time (including 'fromInteger'), but its excellence in doing so with 'Int'
+-- Currently GHC is not very good at evaluating expressions involving
+-- 'Integer' at compile-time. But it is excellent at doing so with 'Int'.
+-- Namely, GHC's 'fromInteger i :: 'Int'' doesn't reliably compile directly
+-- into an 'Int', which severely effects how much can get evaluated at
+-- compile-time.
 --
--- This has instances for 'Nat's up to 1000, and then falls back to 'fromInteger'.
+-- This has instances for 'Nat's up to 1000, and then falls back to
+-- 'fromInteger'.
 class CNat (n :: Nat) where cnat :: proxy n -> Int
 instance CNat 0 where { {-# INLINE cnat #-}; cnat _ = 0}
 instance CNat 1 where { {-# INLINE cnat #-}; cnat _ = 1}

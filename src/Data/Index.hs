@@ -1,18 +1,45 @@
-{- | The indices supplied by this module are static type and value-level linked lists (which is not a concern due to unapologetic inlining of the functions operating on them, which, due to their small static nature, does not cause a code explosion).
-
-Indices look like @ x:.y:.Z :: i:.j:.Z @. The value is the actual index used, and the type is the upper-bound on that index.
-
-For instance, one index of a 4x4 matrix is @ 2:.2:.Z :: 4:.4:.Z @, and another index for a 1024x1024x1024 cube is @ 512:.512:.512:.Z :: 1024:.1024:.1024:.Z @
--}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
+-- | The indices supplied by this module are static type and value-level linked
+-- lists. Since their type gives us information about them, recursion on indices
+-- can be unrolled easily.
+--
+-- Indices look like @ x:.y:.Z :: i:.j:.Z @. The value is the actual index used,
+-- and the type is the upper-bound on that index.
+--
+-- For instance, one index of a 4x4 matrix is @ 2:.2:.Z :: 3:.3:.Z @, and
+-- another index for a 1024x1024x1024 cube is
+-- @ 512:.512:.512:.Z :: 1024:.1024:.1024:.Z @
+--
+-- Parts of this module are alternatively under "Static" and "Runtime" headings.
+-- Functions under "Static" headings should be inlined completely, and functions
+-- under "Runtime" will not. If you do not compile with optimisations on, ghc
+-- will not inline the "static" functions, which will then perform very poorly
+-- compared to their "runtime" counterparts.
 
 module Data.Index
   ( -- * Core
     Index
-  , Dim(zero,unit,size,rank,reflect,correct,intersect,toIndex,fromIndex,next',prev')
+  , Dim(zero,unit,size,rank,correct,zipMin,toIndex,fromIndex,next'
+       ,prev')
   , Rank(..)
   , (:.)(..), Z(..)
     -- * Ranges
-  , Ranged(..)
+  , Ranged
   , Range()
   , Peano(..)
   , ToPeano
@@ -37,8 +64,10 @@ module Data.Index
     -- * Utility
   , range
   , srange
+  , dimHead, dimTail
+  , pdimHead, pdimTail
     -- * Syntax
-  , dim
+  , index
   , module Data.Proxy
   ) where
 
@@ -53,16 +82,20 @@ import Data.Data (Typeable, Data)
 import Data.Foldable (Foldable)
 import Data.Traversable (Traversable)
 import Control.Applicative
-import Language.Haskell.TH.Syntax hiding (Range(..))
-import Language.Haskell.TH.Quote hiding (Range(..))
 import Language.Haskell.TH hiding (Range(..))
+import Language.Haskell.TH.Quote
 
 -- | Index constructor, analogous to ':'
 --
--- The 'Applicative' and 'Monad' instances multiply in their bind operations, and their 'return'/'pure' creates an index whose first dimension is 1.
-data a :. b = {-# UNPACK #-} !Int :. !b deriving (Show,Read,Eq,Ord,Generic,Functor,Foldable,Traversable)
+-- The 'Applicative' and 'Monad' instances multiply in their bind operations,
+-- and their 'return'/'pure' creates an index whose first dimension is 1.
+data a :. b = {-# UNPACK #-} !Int :. !b
+  deriving (Show,Read,Eq,Ord,Generic,Functor,Foldable,Traversable)
+
 -- | The zero index, used to end indices, just as '[]' ends a list.
-data Z      = Z                         deriving (Show,Read,Eq,Ord,Typeable,Data,Generic)
+data Z = Z
+  deriving (Show,Read,Eq,Ord,Typeable,Data,Generic)
+
 infixr 9 :.
 
 -- | A single class encompassing all the instances an index should have.
@@ -72,9 +105,11 @@ instance (Bounded n, Integral n, Show n, Read n, Ix.Ix n, Dim n) => Index n
 class Rank a b where
   -- | Retain the rank, but change the upper bound
   setBound :: a -> b
+
 instance Rank Z Z where
   {-# INLINE setBound #-}
   setBound _ = Z
+
 -- | Rank
 instance Rank xs ys => Rank (x:.xs) (y:.ys) where
   {-# INLINE setBound #-}
@@ -97,9 +132,11 @@ class Ord n => Dim n where
   reflect      = reflect' Proxy
   next         :: n -> n
   prev         :: n -> n
-  -- | Same as 'succ', but there are no boundary checks, so when 'maxBound' is hit, it will wrap around to 'minBound' / 'zero'.
+  -- | Same as 'succ', but there are no boundary checks, so when 'maxBound' is
+  -- hit, it will wrap around to 'minBound' / 'zero'.
   next'        :: n -> n
-  -- | Same as 'pred', but there are no boundary checks, so when 'minBound' / 'zero' is hit, it will wrap around to 'maxBound'.
+  -- | Same as 'pred', but there are no boundary checks, so when 'minBound'
+  -- / 'zero' is hit, it will wrap around to 'maxBound'.
   prev'        :: n -> n
   toIndex      :: n -> Int
   fromIndex'   :: Proxy n -> Int -> n
@@ -110,7 +147,8 @@ class Ord n => Dim n where
   correctOnce  :: n -> n
   overHead     :: (Int -> Int) -> n -> n
   lastDim      :: Proxy n -> n
-  intersect    :: n -> n -> n
+  zipMin       :: n -> n -> n
+
 instance Dim Z where
   {-# INLINE zero #-}
   {-# INLINE unit #-}
@@ -127,7 +165,7 @@ instance Dim Z where
   {-# INLINE correctOnce #-}
   {-# INLINE overHead #-}
   {-# INLINE lastDim #-}
-  {-# INLINE intersect #-}
+  {-# INLINE zipMin #-}
   zero           = Z
   unit           = Z
   rank         _ = 0
@@ -144,7 +182,7 @@ instance Dim Z where
   correctOnce  _ = Z
   overHead   _ _ = Z
   lastDim      _ = Z
-  intersect  _ _ = Z
+  zipMin     _ _ = Z
 instance (CNat x, Dim xs) => Dim (x:.xs) where
   {-# INLINE zero #-}
   {-# INLINE unit #-}
@@ -159,7 +197,7 @@ instance (CNat x, Dim xs) => Dim (x:.xs) where
   {-# INLINE correctOnce #-}
   {-# INLINE overHead #-}
   {-# INLINE lastDim #-}
-  {-# INLINE intersect #-}
+  {-# INLINE zipMin #-}
   zero               = 0 :. zero
   unit               = 1 :. unit
   rank       (_:.xs) = 1 + rank xs
@@ -191,8 +229,7 @@ instance (CNat x, Dim xs) => Dim (x:.xs) where
     | otherwise     = error "correctOnce: index too large" 
   overHead f (x:.xs)  = f x :. xs
   lastDim           d = (pdimHead d - 1) :. lastDim (pdimTail d)
-  intersect (x:.xs) (y:.ys) 
-    = min x y :. intersect xs ys
+  zipMin (x:.xs) (y:.ys)  = min x y :. zipMin xs ys
 
 {-# INLINE range #-}
 -- | The range of an index
@@ -288,6 +325,7 @@ instance (Num xs, Dim (x:.xs)) => Num (x:.xs) where
   {-# INLINE abs #-}
   {-# INLINE fromInteger #-}
   x:.xs + y:.ys  = correctOnce ((x+y) :. (xs+ys))
+  -- amusingly stylish-haskell thinks this is N+K patterns
   x:.xs - y:.ys  = correctOnce ((x-y) :. (xs-ys))
   x:.xs * y:.ys  = correctOnce ((x*y) :. (xs*ys))
   negate (x:.xs) = negate x :. negate xs
@@ -388,7 +426,7 @@ instance Monoid Z where
 instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
   {-# INLINE mempty #-}
   {-# INLINE mappend #-}
-  mempty                       = zero
+  mempty                  = zero
   mappend (x:.xs) (y:.ys) = correctOnce ((x+y):.mappend xs ys)
 instance CNat s => Applicative ((:.) s) where
   pure x                    = 1:.x
@@ -428,18 +466,18 @@ instance (Dim (x:.xs), Num xs) => Ix.Ix (x:.xs) where
 --
 -- Examples:
 --
--- @ id [dim|3 4 5|] ==> id (Proxy :: Proxy (3:.4:.5:.Z)) @
+-- @ id [index|3 4 5|] ==> id (Proxy :: Proxy (3:.4:.5:.Z)) @
 --
--- @ Proxy :: [dim|3 4 5|] ==> Proxy :: Proxy (3:.4:.5:.Z) @
+-- @ Proxy :: [index|3 4 5|] ==> Proxy :: Proxy (3:.4:.5:.Z) @
 --
-dim :: QuasiQuoter
-dim = QuasiQuoter
-  { quoteExp  = \s -> [| Proxy :: $(quoteType dim s) |]
+index :: QuasiQuoter
+index = QuasiQuoter
+  { quoteExp  = \s -> [| Proxy :: $(quoteType index s) |]
   , quoteType = \s ->
       let cons a b = [t| $(litT $ numTyLit a) :. $b |]
           nil      = [t| Z |]
       in [t| Proxy $(foldr cons nil . map read . words $ s) |]
-  , quotePat  = \_ -> [p| Proxy |]
+  , quotePat  = \_ -> [p| Proxy |] -- probably not what would be wanted
   , quoteDec  = error "dim"
   }
 
@@ -448,14 +486,17 @@ dimHead :: CNat x => x:.xs -> Int
 dimHead = cnat . proxyHead
   where proxyHead :: x:.xs -> Proxy x
         proxyHead _ = Proxy
+
 {-# INLINE dimTail #-}
 dimTail :: x:.xs -> xs
 dimTail (_:.xs) = xs
+
 {-# INLINE pdimHead #-}
 pdimHead :: CNat x => Proxy (x:.xs) -> Int
 pdimHead = cnat . proxyHead
   where proxyHead :: Proxy (x:.xs) -> Proxy x
         proxyHead _ = Proxy
+
 {-# INLINE pdimTail #-}
 pdimTail :: Proxy (x:.xs) -> Proxy xs
 pdimTail _ = Proxy
@@ -530,10 +571,6 @@ tagPeano = Tagged
 {-# INLINE tagPeanoI #-}
 tagPeanoI :: Proxy n -> Tagged (ToPeano (Size n)) Int
 tagPeanoI _ = Tagged 0
-
-{-# INLINE toPeanoProxy #-}
-toPeanoProxy :: Proxy n -> Proxy (ToPeano (Size n))
-toPeanoProxy _ = Proxy
 
 {-# INLINE swithRange #-}
 -- | See 'withRange'

@@ -15,28 +15,12 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 library
-  extensions:           DataKinds,
-                        PolyKinds,
-                        ConstraintKinds,
-                        FlexibleInstances,
-                        FlexibleContexts,
-                        TypeFamilies,
-                        MultiParamTypeClasses,
-                        ScopedTypeVariables
-                        UndecidableInstances,
-                        TypeOperators,
-                        BangPatterns,
-                        TemplateHaskell,
-                        PatternGuards
-                        DeriveFunctor,
-                        DeriveFoldable,
-                        DeriveTraversable,
-                        DeriveDataTypeable,
-                        DeriveGeneric,
-                        CPP
 
   exposed-modules:     Data.Index, Data.Index.Nat
+  other-modules:       Data.Index.Tests
   build-depends:       base,
                        tagged,
-                       template-haskell
+                       template-haskell,
+                       QuickCheck
+
   hs-source-dirs:      src
