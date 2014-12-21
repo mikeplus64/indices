@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                indices
-version:             1.4
+version:             1.5.0
 synopsis:            indices
 -- description:         
 license:             MIT
@@ -16,10 +16,9 @@ cabal-version:       >=1.8
 
 library
 
-  exposed-modules:     Data.Index, Data.Index.Nat
-  build-depends:       base,
+  exposed-modules:     Data.Index
+  build-depends:       base >= 4.7 && <5,
                        tagged,
-                       template-haskell,
-                       QuickCheck
+                       template-haskell
 
   hs-source-dirs:      src
