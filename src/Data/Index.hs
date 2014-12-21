@@ -68,7 +68,7 @@ module Data.Index
   , dimHead, dimTail
   , pdimHead, pdimTail
     -- * Syntax
-  , index
+  , dim
   , module Data.Proxy
   ) where
 
@@ -184,7 +184,7 @@ instance Dim Z where
   overHead   _ _ = Z
   lastDim      _ = Z
   zipMin     _ _ = Z
-instance (CNat x, Dim xs) => Dim (x:.xs) where
+instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   {-# INLINE zero #-}
   {-# INLINE unit #-}
   {-# INLINE rank #-}
@@ -429,12 +429,12 @@ instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
   {-# INLINE mappend #-}
   mempty                  = zero
   mappend (x:.xs) (y:.ys) = correctOnce ((x+y):.mappend xs ys)
-instance CNat s => Applicative ((:.) s) where
+instance KnownNat s => Applicative ((:.) s) where
   pure x                    = 1:.x
   d@(ix₁ :. f) <*> ix₂ :. x = ((ix₁*ix₂) `rem` dimHead d) :. f x
   (*>)                      = (>>)
   (<*)                      = flip (>>)
-instance CNat s => Monad ((:.) s) where
+instance KnownNat s => Monad ((:.) s) where
   return x              = 1:.x
   d@(ix₁:.a) >>= f      = case f a of
     ix₂ :. b -> ((ix₁*ix₂) `mod` dimHead d) :. b
@@ -467,13 +467,13 @@ instance (Dim (x:.xs), Num xs) => Ix.Ix (x:.xs) where
 --
 -- Examples:
 --
--- @ id [index|3 4 5|] ==> id (Proxy :: Proxy (3:.4:.5:.Z)) @
+-- @ id [dim|3 4 5|] ==> id (Proxy :: Proxy (3:.4:.5:.Z)) @
 --
--- @ Proxy :: [index|3 4 5|] ==> Proxy :: Proxy (3:.4:.5:.Z) @
+-- @ Proxy :: [dim|3 4 5|] ==> Proxy :: Proxy (3:.4:.5:.Z) @
 --
-index :: QuasiQuoter
-index = QuasiQuoter
-  { quoteExp  = \s -> [| Proxy :: $(quoteType index s) |]
+dim :: QuasiQuoter
+dim = QuasiQuoter
+  { quoteExp  = \s -> [| Proxy :: $(quoteType dim s) |]
   , quoteType = \s ->
       let cons a b = [t| $(litT $ numTyLit a) :. $b |]
           nil      = [t| Z |]
@@ -483,7 +483,7 @@ index = QuasiQuoter
   }
 
 {-# INLINE dimHead #-}
-dimHead :: CNat x => x:.xs -> Int
+dimHead :: KnownNat x => x:.xs -> Int
 dimHead = cnat . proxyHead
   where proxyHead :: x:.xs -> Proxy x
         proxyHead _ = Proxy
@@ -493,7 +493,7 @@ dimTail :: x:.xs -> xs
 dimTail (_:.xs) = xs
 
 {-# INLINE pdimHead #-}
-pdimHead :: CNat x => Proxy (x:.xs) -> Int
+pdimHead :: KnownNat x => Proxy (x:.xs) -> Int
 pdimHead = cnat . proxyHead
   where proxyHead :: Proxy (x:.xs) -> Proxy x
         proxyHead _ = Proxy
