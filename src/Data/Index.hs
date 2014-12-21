@@ -62,7 +62,7 @@ module Data.Index
   , foldrRangeIndices
   , withRangeIndices
     -- * Utility
-  , bound
+  , bounds
   , range
   , srange
   , dimHead, dimTail
@@ -72,7 +72,6 @@ module Data.Index
   , module Data.Proxy
   ) where
 
-import Data.Index.Nat
 import GHC.Generics
 import GHC.TypeLits
 import Data.Proxy
@@ -131,7 +130,9 @@ class Ord n => Dim n where
   {-# INLINE reflect #-}
   reflect      :: n
   reflect      = reflect' Proxy
+  -- | Increment by one.
   next         :: n -> n
+  -- | Decrement by one.
   prev         :: n -> n
   -- | Same as 'succ', but there are no boundary checks, so when 'maxBound' is
   -- hit, it will wrap around to 'minBound' / 'zero'.
@@ -139,15 +140,22 @@ class Ord n => Dim n where
   -- | Same as 'pred', but there are no boundary checks, so when 'minBound'
   -- / 'zero' is hit, it will wrap around to 'maxBound'.
   prev'        :: n -> n
+  -- | Create an 'Int' index.
   toIndex      :: n -> Int
   fromIndex'   :: Proxy n -> Int -> n
   {-# INLINE fromIndex #-}
+  -- | Create an index from its 'Int' representation.
   fromIndex    :: Int -> n
   fromIndex    = fromIndex' Proxy
+  -- | Ensure an index is within its bounds.
   correct      :: n -> n
+  -- | Ensure the "head" dimension is within its bounds.
   correctOnce  :: n -> n
+  -- | Alter the "head" dimension.
   overHead     :: (Int -> Int) -> n -> n
+  -- | See 'maxBound'
   lastDim      :: Proxy n -> n
+  -- | Get the minimum values of two indices at each dimension
   zipMin       :: n -> n -> n
 
 instance Dim Z where
@@ -616,5 +624,8 @@ sfoldlRangeIndices :: Ranged o => Proxy o -> (b -> Int -> b) -> b -> b
 sfoldlRangeIndices dim f z = sfoldlRangeIndices_ (tagPeanoI dim) f z
 
 -- | Create a bound for use with e.g. "Data.Array.array"
-bound :: (Dim a, Bounded a) => Proxy a -> (a, a)
-bound _ = (zero, maxBound)
+bounds :: (Dim a, Bounded a) => Proxy a -> (a, a)
+bounds _ = (zero, maxBound)
+
+cnat :: KnownNat n => proxy (n :: Nat) -> Int
+cnat = fromInteger . natVal
