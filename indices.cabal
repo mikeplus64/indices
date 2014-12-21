@@ -17,7 +17,6 @@ cabal-version:       >=1.8
 library
 
   exposed-modules:     Data.Index, Data.Index.Nat
-  other-modules:       Data.Index.Tests
   build-depends:       base,
                        tagged,
                        template-haskell,

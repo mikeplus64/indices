@@ -62,6 +62,7 @@ module Data.Index
   , foldrRangeIndices
   , withRangeIndices
     -- * Utility
+  , bound
   , range
   , srange
   , dimHead, dimTail
@@ -443,7 +444,7 @@ instance Ix.Ix Z where
   {-# INLINE index #-}
   {-# INLINE inRange #-}
   {-# INLINE rangeSize #-}
-  range   _   = [Z]
+  range _ = [Z]
   index   _ _ = 0
   inRange _ _ = True
   rangeSize _ = 0
@@ -613,3 +614,7 @@ sfoldrRangeIndices dim f z = sfoldrRangeIndices_ (tagPeanoI dim) f z
 -- With optimisations, this compiles to an unrolled loop
 sfoldlRangeIndices :: Ranged o => Proxy o -> (b -> Int -> b) -> b -> b
 sfoldlRangeIndices dim f z = sfoldlRangeIndices_ (tagPeanoI dim) f z
+
+-- | Create a bound for use with e.g. "Data.Array.array"
+bound :: (Dim a, Bounded a) => Proxy a -> (a, a)
+bound _ = (zero, maxBound)
