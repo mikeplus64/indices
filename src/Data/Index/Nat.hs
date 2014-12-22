@@ -6,6 +6,3 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Data.Index.Nat (cnat, module TypeLits) where
 import GHC.TypeLits as TypeLits
-
-cnat :: KnownNat n => proxy (n :: Nat) -> Int
-cnat = fromInteger . natVal
