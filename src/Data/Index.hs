@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -33,43 +34,37 @@
 
 module Data.Index
   ( -- * Core
-    Index
-  , Dim(zero,unit,size,rank,correct,zipMin,toIndex,fromIndex,next'
        ,prev')
   , Rank(..)
   , (:.)(..), Z(..)
-    -- * Ranges
-  , Ranged
-  , Range()
-  , Peano(..)
-  , ToPeano
-  , Size
-    -- ** Static
-  , sfoldlRange
-  , sfoldrRange
-  , swithRange
-    -- ** Runtime
+    -- * Selecting whether to unroll loops
+  , Mode(..), roll, unroll, modeDim
+    -- * Using ranges
   , foldlRange
   , foldrRange
   , withRange 
     -- ** Over 'Int' indices
-    -- *** Static
-  , sfoldlRangeIndices
-  , sfoldrRangeIndices
-  , swithRangeIndices
-    -- *** Runtime
   , foldlRangeIndices
   , foldrRangeIndices
   , withRangeIndices
+    -- * Range types
+  , Ranged
+  , InRange
+  , Range()
+  , Peano(..)
+  , ToPeano
+  , Size
     -- * Utility
   , bounds
   , range
-  , srange
   , dimHead, dimTail
   , pdimHead, pdimTail
+  , cnat
+  , And
     -- * Syntax
-  , dim
+  , dim, dimu, dimr
   , module Data.Proxy
+  , hello
   ) where
 
 import GHC.Generics
@@ -98,10 +93,6 @@ data Z = Z
 
 infixr 9 :.
 
--- | A single class encompassing all the instances an index should have.
-class (Bounded n, Integral n, Show n, Read n, Ix.Ix n, Dim n) => Index n
-instance (Bounded n, Integral n, Show n, Read n, Ix.Ix n, Dim n) => Index n
-
 class Rank a b where
   -- | Retain the rank, but change the upper bound
   setBound :: a -> b
@@ -123,9 +114,9 @@ class Ord n => Dim n where
   -- | The number of dimensions in an index
   rank         :: n -> Int
   -- | The size of the index
-  size         :: Proxy n -> Int
+  size         :: proxy n -> Int
   -- | Reify a type-level index into a value-level one
-  reflect'     :: Proxy n -> n
+  reflect'     :: proxy n -> n
   -- | Reify a type-level index into a value-level one
   {-# INLINE reflect #-}
   reflect      :: n
@@ -142,7 +133,7 @@ class Ord n => Dim n where
   prev'        :: n -> n
   -- | Create an 'Int' index.
   toIndex      :: n -> Int
-  fromIndex'   :: Proxy n -> Int -> n
+  fromIndex'   :: proxy n -> Int -> n
   {-# INLINE fromIndex #-}
   -- | Create an index from its 'Int' representation.
   fromIndex    :: Int -> n
@@ -154,7 +145,7 @@ class Ord n => Dim n where
   -- | Alter the "head" dimension.
   overHead     :: (Int -> Int) -> n -> n
   -- | See 'maxBound'
-  lastDim      :: Proxy n -> n
+  lastDim      :: proxy n -> n
   -- | Get the minimum values of two indices at each dimension
   zipMin       :: n -> n -> n
 
@@ -240,74 +231,82 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   lastDim           d = (pdimHead d - 1) :. lastDim (pdimTail d)
   zipMin (x:.xs) (y:.ys)  = min x y :. zipMin xs ys
 
+-- | Select whether to generate an unrolled loop or just the loop at
+-- compile-time.
+data Mode :: * -> * where
+  Unroll :: Ranged i => Mode i
+  Roll   :: Dim i => Mode i
+
+unroll :: Ranged a => Proxy a -> Mode a
+unroll _ = Unroll
+
+roll :: Dim a => Proxy a -> Mode a
+roll _ = Roll
+
+modeDim :: Mode a -> Proxy a
+modeDim _ = Proxy
+
 {-# INLINE range #-}
 -- | The range of an index
---
--- @ range = foldrRange Proxy (:) [] @
-range :: Dim n => [n]
-range = foldrRange Proxy (:) []
-
-{-# INLINE srange #-}
--- | Statically generated range of an index
---
--- @ srange = sfoldrRange Proxy (:) [] @
-srange :: Ranged n => [n]
-srange = sfoldrRange Proxy (:) []
+range :: Mode n -> [n]
+range mode = foldrRange mode (:) []
 
 {-# INLINE proxyOf #-}
 proxyOf :: a -> Proxy a
 proxyOf = const Proxy
 
-{-# INLINE foldlRange #-}
--- | Eager left fold over a range
---
--- @ 'foldlRange' r f z == 'Data.List.foldl'' f z ('asProxyTypeOf' 'range' r) @
-foldlRange :: Dim a => Proxy a -> (b -> a -> b) -> b -> b
-foldlRange _ cons = go zero
-  where
-    top = lastDim Proxy
-    go !i !acc
-      | i < top   = go (next' i) (cons acc i)
-      | otherwise = cons acc top
-
 {-# INLINE foldrRange #-}
--- | Lazy right fold over a range
---
--- @ 'foldrRange' r f z == 'Data.List.foldr' f z ('asProxyTypeOf' 'range' r) @
-foldrRange :: Dim a => Proxy a -> (a -> b -> b) -> b -> b
-foldrRange _ cons nil = go zero
-  where
-    top = lastDim Proxy
-    go !i
-      | i < top   = i `cons` go (next' i)
-      | otherwise = cons top nil
+-- | Lazy right fold over a range.
+foldrRange :: Mode n -> (n -> b -> b) -> b -> b
+foldrRange Roll cons nil = go zero
+ where
+  top = lastDim Proxy -- hopefully make sure this isn't recomputed
+  go !i
+    | i < top   = i `cons` go (next' i)
+    | otherwise = cons top nil
+foldrRange Unroll cons nil = sfoldrRange_ (tagPeano zero) cons nil
+
+{-# INLINE foldlRange #-}
+-- | Lazy right fold over a range.
+foldlRange :: Mode n -> (b -> n -> b) -> b -> b
+foldlRange Roll f = go zero
+ where
+  top = lastDim Proxy -- hopefully make sure this isn't recomputed
+  go !i !acc
+    | i < top   = go (next' i) (f acc i)
+    | otherwise = f acc i
+foldlRange Unroll f = sfoldlRange_ (tagPeano zero) f
 
 {-# INLINE withRange #-}
 -- | Compute something from a range
-withRange :: (Applicative m, Dim a) => Proxy a -> (a -> m ()) -> m ()
+withRange :: Applicative m => Mode a -> (a -> m ()) -> m ()
 withRange m f = foldrRange m (\d acc -> acc *> f d) (pure ())
 
 {-# INLINE foldlRangeIndices #-}
--- | Strict left fold over the /raw/ indices under a range
-foldlRangeIndices :: Dim a => Proxy a -> (b -> Int -> b) -> b -> b
-foldlRangeIndices m cons = go 0
+-- | Strict left fold over the /raw/ 'Int' indices under a range
+foldlRangeIndices :: Mode n -> (b -> Int -> b) -> b -> b
+foldlRangeIndices m@Roll cons = go 0
   where
+    s = size m
     go !i !acc
-      | i < size m = go (i+1) (cons acc i)
-      | otherwise  = acc
+      | i < s     = go (i+1) (cons acc i)
+      | otherwise = acc
+foldlRangeIndices m@Unroll cons = sfoldlRangeIndices_ (tagPeanoI m) cons
 
 {-# INLINE foldrRangeIndices #-}
--- | Lazy right fold over the /raw/ indices under a range
-foldrRangeIndices :: Dim a => Proxy a -> (Int -> b -> b) -> b -> b
-foldrRangeIndices m cons nil = go 0
+-- | Lazy right fold over the /raw/ 'Int' indices under a range
+foldrRangeIndices :: Mode n -> (Int -> b -> b) -> b -> b
+foldrRangeIndices m@Roll cons nil = go 0
   where
+    s = size m
     go !i
-      | i < size m = i `cons` go (i+1)
-      | otherwise  = nil
+      | i < s     = i `cons` go (i+1)
+      | otherwise = nil
+foldrRangeIndices m@Unroll cons nil = sfoldrRangeIndices_ (tagPeanoI m) cons nil
 
 {-# INLINE withRangeIndices #-}
 -- | Compute something using the /raw/ indices under a range
-withRangeIndices :: (Applicative m, Dim a) => Proxy a -> (Int -> m ()) -> m ()
+withRangeIndices :: Applicative m => Mode n -> (Int -> m ()) -> m ()
 withRangeIndices m f = foldrRangeIndices m (\d acc -> acc *> f d) (pure ())
 
 instance Num Z where
@@ -471,6 +470,17 @@ instance (Dim (x:.xs), Num xs) => Ix.Ix (x:.xs) where
       proxify p _ = p
 
 -- | Expands to a 'Proxy' with the phantom type being the dimension specified
+dimQQ val ty =  QuasiQuoter
+  { quoteExp  = \s -> [| $val :: $(quoteType dim s) |]
+  , quoteType = \s ->
+      let cons a b = [t| $(litT $ numTyLit a) :. $b |]
+          nil      = [t| Z |]
+      in [t| $ty $(foldr cons nil . map read . words $ s) |]
+  , quotePat  = error "dim in pattern context"
+  , quoteDec  = error "dim in declaration context"
+  }
+                            
+-- | Expands to a 'Proxy' with the phantom type being the dimension specified.
 -- Works in types and expressions.
 --
 -- Examples:
@@ -480,15 +490,15 @@ instance (Dim (x:.xs), Num xs) => Ix.Ix (x:.xs) where
 -- @ Proxy :: [dim|3 4 5|] ==> Proxy :: Proxy (3:.4:.5:.Z) @
 --
 dim :: QuasiQuoter
-dim = QuasiQuoter
-  { quoteExp  = \s -> [| Proxy :: $(quoteType dim s) |]
-  , quoteType = \s ->
-      let cons a b = [t| $(litT $ numTyLit a) :. $b |]
-          nil      = [t| Z |]
-      in [t| Proxy $(foldr cons nil . map read . words $ s) |]
-  , quotePat  = \_ -> [p| Proxy |] -- probably not what would be wanted
-  , quoteDec  = error "dim"
-  }
+dim = dimQQ [| Proxy |] [t| Proxy |]
+
+-- | Same as 'dim', but create an 'Unroll' instead of a 'Proxy'.
+dimu :: QuasiQuoter
+dimu = dimQQ [| Unroll |] [t| Mode |]
+
+-- | Same as 'dim', but create a 'Roll' instead of a 'Proxy'.
+dimr :: QuasiQuoter
+dimr = dimQQ [| Roll |] [t| Mode |]
 
 {-# INLINE dimHead #-}
 dimHead :: KnownNat x => x:.xs -> Int
@@ -501,13 +511,13 @@ dimTail :: x:.xs -> xs
 dimTail (_:.xs) = xs
 
 {-# INLINE pdimHead #-}
-pdimHead :: KnownNat x => Proxy (x:.xs) -> Int
+pdimHead :: KnownNat x => proxy (x:.xs) -> Int
 pdimHead = cnat . proxyHead
-  where proxyHead :: Proxy (x:.xs) -> Proxy x
+  where proxyHead :: proxy (x:.xs) -> Proxy x
         proxyHead _ = Proxy
 
 {-# INLINE pdimTail #-}
-pdimTail :: Proxy (x:.xs) -> Proxy xs
+pdimTail :: proxy (x:.xs) -> Proxy xs
 pdimTail _ = Proxy
 
 -- | Types that support static range operations
@@ -578,54 +588,14 @@ tagPeano :: Dim n => n -> Tagged (ToPeano (Size n)) n
 tagPeano = Tagged
 
 {-# INLINE tagPeanoI #-}
-tagPeanoI :: Proxy n -> Tagged (ToPeano (Size n)) Int
+tagPeanoI :: proxy n -> Tagged (ToPeano (Size n)) Int
 tagPeanoI _ = Tagged 0
-
-{-# INLINE swithRange #-}
--- | See 'withRange'
---
--- With optimisations, this compiles to an unrolled loop
-swithRange :: (Applicative m, Ranged o) => Proxy o -> (o -> m ()) -> m ()
-swithRange _ (f :: o -> m ()) = swithRange_ (Tagged zero :: Tagged (ToPeano (Size o)) o) f
-
-{-# INLINE sfoldrRange #-}
--- | See 'foldrRange'
---
--- With optimisations, this compiles to an unrolled loop
-sfoldrRange :: Ranged o => Proxy o -> (o -> b -> b) -> b -> b 
-sfoldrRange _ (f :: o -> b -> b) z = sfoldrRange_ (tagPeano zero) f z
-
-{-# INLINE sfoldlRange #-}
--- | See 'foldlRange'
---
--- With optimisations, this compiles to an unrolled loop
-sfoldlRange :: Ranged o => Proxy o -> (b -> o -> b) -> b -> b 
-sfoldlRange _ (f :: b -> o -> b) !z = sfoldlRange_ (tagPeano zero) f z
-
-{-# INLINE swithRangeIndices #-}
--- | See 'withRangeIndices'
---
--- With optimisations, this compiles to an unrolled loop
-swithRangeIndices :: (Applicative m, Ranged o) => Proxy o -> (Int -> m ()) -> m ()
-swithRangeIndices dim f = swithRangeIndices_ (tagPeanoI dim) f
-
-{-# INLINE sfoldrRangeIndices #-}
--- | See 'foldrRangeIndices'
---
--- With optimisations, this compiles to an unrolled loop
-sfoldrRangeIndices :: Ranged o => Proxy o -> (Int -> b -> b) -> b -> b
-sfoldrRangeIndices dim f z = sfoldrRangeIndices_ (tagPeanoI dim) f z
-
-{-# INLINE sfoldlRangeIndices #-}
--- | See 'foldlRangeIndices'
---
--- With optimisations, this compiles to an unrolled loop
-sfoldlRangeIndices :: Ranged o => Proxy o -> (b -> Int -> b) -> b -> b
-sfoldlRangeIndices dim f z = sfoldlRangeIndices_ (tagPeanoI dim) f z
 
 -- | Create a bound for use with e.g. "Data.Array.array"
 bounds :: (Dim a, Bounded a) => Proxy a -> (a, a)
 bounds _ = (zero, maxBound)
 
+-- | @ fromInteger . natVal @
 cnat :: KnownNat n => proxy (n :: Nat) -> Int
 cnat = fromInteger . natVal
+
