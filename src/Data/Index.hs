@@ -27,12 +27,6 @@
 -- another index for a 1024x1024x1024 cube is
 -- @ 512:.512:.512:.Z :: 1024:.1024:.1024:.Z @
 --
--- Parts of this module are alternatively under "Static" and "Runtime" headings.
--- Functions under "Static" headings should be inlined completely, and functions
--- under "Runtime" will not. If you do not compile with optimisations on, ghc
--- will not inline the "static" functions, which will then perform very poorly
--- compared to their "runtime" counterparts.
-
 module Data.Index
   ( -- * Core
        ,prev')
