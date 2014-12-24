@@ -451,21 +451,19 @@ instance Ix.Ix Z where
   index   _ _ = 0
   inRange _ _ = True
   rangeSize _ = 0
-instance (Dim (x:.xs), Num xs) => Ix.Ix (x:.xs) where
+
+-- | The indices in an Ix instance are always bound by (0, t), where t is the
+-- type of the index.
+instance (Ranged (x:.xs), Num xs) => Ix.Ix (x:.xs) where
   {-# INLINE range #-}
   {-# INLINE index #-}
   {-# INLINE inRange #-}
   {-# INLINE rangeSize #-}
-  range           = uncurry enumFromTo
+  range _         = range Unroll
   index _       c = toIndex c
-  inRange _     c = minBound < c && c < maxBound
-  rangeSize (l,_) = size (Proxy `proxify` l)
-    where
-      {-# INLINE proxify #-}
-      proxify :: Proxy a -> a -> Proxy a
-      proxify p _ = p
+  inRange _     c = minBound <= c && c <= maxBound
+  rangeSize (_,b) = size (proxyOf b)
 
--- | Expands to a 'Proxy' with the phantom type being the dimension specified
 dimQQ val ty =  QuasiQuoter
   { quoteExp  = \s -> [| $val :: $(quoteType dim s) |]
   , quoteType = \s ->
