@@ -29,12 +29,22 @@
 --
 module Data.Index
   ( -- * Core
-    Dim(zero,unit,size,rank,correct,reflect,zipMin,toIndex,fromIndex,next'
-       ,prev')
+    Dim( each
+       , size
+       , rank
+       , correct
+       , reflect
+       , toIndex
+       , fromIndex
+       , next
+       , prev)
+
+  , zero
+
   , Rank(..)
   , (:.)(..), Z(..)
     -- * Selecting whether to unroll loops
-  , Mode(..), roll, unroll, modeDim
+  , Mode(..), roll, unroll, modeProxy
     -- * Using ranges
   , foldlRange
   , foldrRange
@@ -60,7 +70,6 @@ module Data.Index
     -- * Syntax
   , dim, dimu, dimr
   , module Data.Proxy
-  , hello
   ) where
 
 import GHC.Generics
@@ -102,86 +111,104 @@ instance Rank xs ys => Rank (x:.xs) (y:.ys) where
   {-# INLINE setBound #-}
   setBound (x:.xs) = x:.setBound xs
 
+zero :: Dim a => a
+zero = each 0
+  
 class Ord n => Dim n where
-  -- | All zeros
-  zero         :: n
-  -- | All ones
-  unit         :: n
+  -- | @each n@ = an index of all 'n'
+  each         :: Int -> n
+  
   -- | The number of dimensions in an index
   rank         :: n -> Int
+
   -- | The size of the index
   size         :: proxy n -> Int
+
   -- | Reify a type-level index into a value-level one
   reflect'     :: proxy n -> n
+
   -- | Reify a type-level index into a value-level one
   {-# INLINE reflect #-}
   reflect      :: n
   reflect      = reflect' Proxy
-  -- | Increment by one.
+
+  -- | Increment by one. Wraps around to 'minBound' when 'maxBound' is given.
   next         :: n -> n
-  -- | Decrement by one.
+
+  -- | Decrement by one. Wraps around to 'maxBound' when 'minBound' is given.
   prev         :: n -> n
-  -- | Same as 'succ', but there are no boundary checks, so when 'maxBound' is
-  -- hit, it will wrap around to 'minBound' / 'zero'.
-  next'        :: n -> n
-  -- | Same as 'pred', but there are no boundary checks, so when 'minBound'
-  -- / 'zero' is hit, it will wrap around to 'maxBound'.
-  prev'        :: n -> n
+
   -- | Create an 'Int' index.
   toIndex      :: n -> Int
+
   fromIndex'   :: proxy n -> Int -> n
   {-# INLINE fromIndex #-}
   -- | Create an index from its 'Int' representation.
   fromIndex    :: Int -> n
   fromIndex    = fromIndex' Proxy
+
   -- | Ensure an index is within its bounds.
   correct      :: n -> n
+
   -- | Ensure the "head" dimension is within its bounds.
   correctOnce  :: n -> n
-  -- | Alter the "head" dimension.
-  overHead     :: (Int -> Int) -> n -> n
+
   -- | See 'maxBound'
   lastDim      :: proxy n -> n
-  -- | Get the minimum values of two indices at each dimension
-  zipMin       :: n -> n -> n
+
+  -- | Similar to 'zipWith'. This will take the modulus of your input.
+  -- The first argument to the inputted function is the max bound at that index.
+  zipDims :: (Int -> Int -> Int -> Int) -> n -> n -> n
+
+  -- | Same as 'zipDims', but it doesn't check whether the 'Int's you generate
+  -- are valid.
+  -- The first argument to the inputted function is the max bound at that index.
+  unsafeZipDims :: (Int -> Int -> Int -> Int) -> n -> n -> n
+
+  -- | Map over indices. The first argument to the inputted functions is the
+  -- bound at that index.
+  mapDim :: (Int -> Int -> Int) -> n -> n
+
+  -- | Map over indices. The first argument to the inputted functions is the
+  -- bound at that index.
+  -- The output is not checked to be valid.
+  unsafeMapDim :: (Int -> Int -> Int) -> n -> n
 
 instance Dim Z where
-  {-# INLINE zero #-}
-  {-# INLINE unit #-}
+  {-# INLINE each #-}
   {-# INLINE rank #-}
   {-# INLINE size #-}
   {-# INLINE reflect' #-}
   {-# INLINE next #-}
   {-# INLINE prev #-}
-  {-# INLINE next' #-}
-  {-# INLINE prev' #-}
   {-# INLINE toIndex #-}
   {-# INLINE fromIndex' #-}
   {-# INLINE correct #-}
   {-# INLINE correctOnce #-}
-  {-# INLINE overHead #-}
   {-# INLINE lastDim #-}
-  {-# INLINE zipMin #-}
-  zero           = Z
-  unit           = Z
+  {-# INLINE zipDims #-}
+  {-# INLINE unsafeZipDims #-}
+  {-# INLINE mapDim #-}
+  {-# INLINE unsafeMapDim #-}
+  each         _ = Z
   rank         _ = 0
   size         _ = 1
   reflect'     _ = Z
   next         _ = error "next: Z"
   prev         _ = error "prev: Z"
-  next'        _ = Z
-  prev'        _ = Z
   toIndex      _ = 0
   fromIndex' _ i | i > 0      = error "fromIndex: index too large" 
                  | otherwise  = Z
   correct      _ = Z
   correctOnce  _ = Z
-  overHead   _ _ = Z
   lastDim      _ = Z
-  zipMin     _ _ = Z
+  zipDims _ _ _  = Z
+  unsafeZipDims _ _ _ = Z
+  mapDim _ _ = Z
+  unsafeMapDim _ _ = Z
+
 instance (KnownNat x, Dim xs) => Dim (x:.xs) where
-  {-# INLINE zero #-}
-  {-# INLINE unit #-}
+  {-# INLINE each #-}
   {-# INLINE rank #-}
   {-# INLINE size #-}
   {-# INLINE reflect' #-}
@@ -191,41 +218,61 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   {-# INLINE fromIndex' #-}
   {-# INLINE correct #-}
   {-# INLINE correctOnce #-}
-  {-# INLINE overHead #-}
   {-# INLINE lastDim #-}
-  {-# INLINE zipMin #-}
-  zero               = 0 :. zero
-  unit               = 1 :. unit
-  rank       (_:.xs) = 1 + rank xs
-  size             d = pdimHead d * size (pdimTail d)
-  reflect'         d = pdimHead d :. reflect' (pdimTail d)
+  {-# INLINE zipDims #-}
+  {-# INLINE unsafeZipDims #-}
+  {-# INLINE mapDim #-}
+  {-# INLINE unsafeMapDim #-}
+  each a 
+    | 0 <= a && a < dimHead d = d
+    | otherwise               = error "each: out of range"
+   where
+    d = a:.each a
+
+  rank (_:.xs) = 1 + rank xs
+
+  size d = pdimHead d * size (pdimTail d)
+
+  reflect' d = pdimHead d :. reflect' (pdimTail d)
+
   next d@(x:.xs)
-    | x < dimHead d - 1          = (x+1) :. xs
-    | xs' <- next xs, xs' > zero = 0 :. xs'
-    | otherwise                  = error "next: index already at maxBound"
+    | x < dimHead d - 1 = (x+1) :. xs
+    | otherwise         = 0 :. next xs
+
   prev (x:.xs)
     | x > 0     = (x-1) :. xs
     | xs > zero = 0 :. prev xs
-    | otherwise = error "prev: index below zero"
-  next' d@(x:.xs)
-    | x < dimHead d - 1 = (x+1) :. xs
-    | otherwise         = 0 :. next' xs
-  prev' (x:.xs)
-    | x > 0     = (x-1) :. xs
-    | xs > zero = 0 :. prev xs
-    | otherwise = lastDim Proxy
+    | otherwise = maxBound
+
   toIndex   d@(x:.xs) = x + dimHead d * toIndex xs
-  fromIndex' d        = \ix -> (ix `mod` h) :. fromIndex' (pdimTail d) (ix `div` h) 
+
+  fromIndex' d = \ix -> (ix `mod` h) :. fromIndex' (pdimTail d) (ix `div` h) 
     where h = pdimHead d
+
   correct d@(x:.xs) 
-    | x < dimHead d = x:.correct xs
-    | otherwise     = error "correct: index too large" 
+    | 0 <= x && x < dimHead d = x:.correct xs
+    | otherwise               = error "correct: index not in range" 
+
   correctOnce d@(x:.xs) 
-    | x < dimHead d = x:.xs
-    | otherwise     = error "correctOnce: index too large" 
-  overHead f (x:.xs)  = f x :. xs
-  lastDim           d = (pdimHead d - 1) :. lastDim (pdimTail d)
-  zipMin (x:.xs) (y:.ys)  = min x y :. zipMin xs ys
+    | 0 <= x && x < dimHead d = x:.xs
+    | otherwise               = error "correctOnce: index not in range" 
+
+
+  lastDim d = (pdimHead d - 1) :. lastDim (pdimTail d)
+
+  zipDims f d@(x:.xs) (y:.ys)
+    | 0 <= r && r < dimHead d = r :. zipDims f xs ys
+    | otherwise               = error "zipDims: index not in range"
+   where r = f (dimHead d) x y
+
+  unsafeZipDims f d@(x:.xs) (y:.ys) = f (dimHead d) x y :. unsafeZipDims f xs ys
+
+  mapDim f d@(x:.xs)
+    | 0 <= r && r < dimHead d = r :. mapDim f xs
+    | otherwise               = error "mapDims: index not in range"
+   where r = f (dimHead d) x
+
+  unsafeMapDim f d@(x:.xs) = f (dimHead d) x :. unsafeMapDim f xs
 
 -- | Select whether to generate an unrolled loop or just the loop at
 -- compile-time.
@@ -233,14 +280,16 @@ data Mode :: * -> * where
   Unroll :: Ranged i => Mode i
   Roll   :: Dim i => Mode i
 
+-- | You might prefer to use 'dimu'
 unroll :: Ranged a => Proxy a -> Mode a
 unroll _ = Unroll
 
+-- | You might prefer to use 'dimr'
 roll :: Dim a => Proxy a -> Mode a
 roll _ = Roll
 
-modeDim :: Mode a -> Proxy a
-modeDim _ = Proxy
+modeProxy :: Mode a -> Proxy a
+modeProxy _ = Proxy
 
 {-# INLINE range #-}
 -- | The range of an index
@@ -258,7 +307,7 @@ foldrRange Roll cons nil = go zero
  where
   top = lastDim Proxy -- hopefully make sure this isn't recomputed
   go !i
-    | i < top   = i `cons` go (next' i)
+    | i < top   = i `cons` go (next i)
     | otherwise = cons top nil
 foldrRange Unroll cons nil = sfoldrRange_ (tagPeano zero) cons nil
 
@@ -269,7 +318,7 @@ foldlRange Roll f = go zero
  where
   top = lastDim Proxy -- hopefully make sure this isn't recomputed
   go !i !acc
-    | i < top   = go (next' i) (f acc i)
+    | i < top   = go (next i) (f acc i)
     | otherwise = f acc i
 foldlRange Unroll f = sfoldlRange_ (tagPeano zero) f
 
@@ -305,6 +354,18 @@ foldrRangeIndices m@Unroll cons nil = sfoldrRangeIndices_ (tagPeanoI m) cons nil
 withRangeIndices :: Applicative m => Mode n -> (Int -> m ()) -> m ()
 withRangeIndices m f = foldrRangeIndices m (\d acc -> acc *> f d) (pure ())
 
+{-# INLINE zipMod #-}
+zipMod :: Dim n => (Int -> Int -> Int) -> n -> n -> n
+zipMod f = unsafeZipDims (\h a b -> f a b `mod` h)
+
+{-# INLINE unsafeZipDims' #-}
+unsafeZipDims':: Dim n => (Int -> Int -> Int) -> n -> n -> n
+unsafeZipDims' f = unsafeZipDims (\_ a b -> f a b)
+
+{-# INLINE mapMod #-}
+mapMod :: Dim n => (Int -> Int) -> n -> n
+mapMod f = unsafeMapDim (\h a -> f a `mod` h)
+
 instance Num Z where
   {-# INLINE (+) #-}
   {-# INLINE (-) #-}
@@ -321,7 +382,7 @@ instance Num Z where
   abs         _ = Z
   fromInteger _ = Z
 
-instance (Num xs, Dim (x:.xs)) => Num (x:.xs) where
+instance Dim (x:.xs) => Num (x:.xs) where
   {-# INLINE (+) #-}
   {-# INLINE (-) #-}
   {-# INLINE (*) #-}
@@ -329,13 +390,13 @@ instance (Num xs, Dim (x:.xs)) => Num (x:.xs) where
   {-# INLINE signum #-}
   {-# INLINE abs #-}
   {-# INLINE fromInteger #-}
-  x:.xs + y:.ys  = correctOnce ((x+y) :. (xs+ys))
-  x:.xs - y:.ys  = correctOnce ((x-y) :. (xs-ys))
-  x:.xs * y:.ys  = correctOnce ((x*y) :. (xs*ys))
-  negate (x:.xs) = negate x :. negate xs
-  signum (x:.xs) = signum x :. signum xs
-  abs (x:.xs)    = abs x    :. abs xs
-  fromInteger    = fromIndex . fromIntegral
+  (+) = zipMod (+)
+  (-) = zipMod (-)
+  (*) = zipMod (*)
+  negate = mapMod negate
+  signum = mapMod signum
+  abs = mapMod abs
+  fromInteger = fromIndex . fromIntegral
 
 instance Real Z where
   {-# INLINE toRational #-}
@@ -362,7 +423,8 @@ instance Enum Z where
   enumFromThen     _ _ = [Z]
   enumFromTo       _ _ = [Z]
   enumFromThenTo _ _ _ = [Z]
-instance (Dim (x:.xs), Num xs) => Enum (x:.xs) where
+
+instance Dim (x:.xs) => Enum (x:.xs) where
   {-# INLINE toEnum #-}
   {-# INLINE fromEnum #-}
   {-# INLINE succ #-}
@@ -372,18 +434,27 @@ instance (Dim (x:.xs), Num xs) => Enum (x:.xs) where
   {-# INLINE enumFromThenTo #-}
   toEnum               = fromIndex
   fromEnum             = toIndex
-  succ                 = next
-  pred                 = prev
+
+  succ d
+    | d < lastDim Proxy = next d
+    | otherwise         = error "succ: index within bound"
+
+  pred d
+    | d > zero  = prev d
+    | otherwise = error "succ: index within bound"
+
   enumFrom !l
-    | l < maxBound = l : enumFrom (next' l)
+    | l < maxBound = l : enumFrom (next l)
     | otherwise    = [l]
+
   enumFromThen !l !j
-    | l < maxBound = l : enumFromThen (l+j) j
+    | l < maxBound = l : enumFromThen (zipMod (+) l j) j
     | otherwise    = [l]
+
   enumFromTo !l !h
-    | l < h     = l : enumFromTo (next' l) h
+    | l < h     = l : enumFromTo (next l) h
     | otherwise = [h]
-  -- todo: working enumFromThenTo
+
 instance Integral Z where
   {-# INLINE div #-}
   {-# INLINE mod #-}
@@ -400,7 +471,7 @@ instance Integral Z where
   divMod  _ _ = (Z, Z)
   toInteger _ = 0
 
-instance (Integral xs, Dim (x:.xs)) => Integral (x:.xs) where
+instance (Integral xs, Dim (x:.xs), Enum (x:.xs)) => Integral (x:.xs) where
   {-# INLINE div #-}
   {-# INLINE mod #-}
   {-# INLINE quot #-}
@@ -408,13 +479,13 @@ instance (Integral xs, Dim (x:.xs)) => Integral (x:.xs) where
   {-# INLINE quotRem #-}
   {-# INLINE divMod #-}
   {-# INLINE toInteger #-}
-  div  (x:.xs) (y:.ys) = div x y :. div xs ys
-  mod  (x:.xs) (y:.ys) = mod x y :. mod xs ys
-  quot (x:.xs) (y:.ys) = quot x y :. quot xs ys
-  rem  (x:.xs) (y:.ys) = rem x y :. rem xs ys
-  quotRem xs ys        = (quot xs ys, rem xs ys)
-  divMod xs ys         = (div xs ys, mod xs ys)
-  toInteger            = toInteger . toIndex
+  div  = unsafeZipDims' div
+  mod  = unsafeZipDims' mod
+  quot = unsafeZipDims' quot
+  rem  = unsafeZipDims' rem
+  quotRem xs ys = (quot xs ys, rem xs ys)
+  divMod  xs ys = (div xs ys, mod xs ys)
+  toInteger = toInteger . toIndex
 
 instance Bounded Z where
   {-# INLINE minBound #-}
@@ -437,12 +508,12 @@ instance Monoid Z where
 instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
   {-# INLINE mempty #-}
   {-# INLINE mappend #-}
-  mempty                  = zero
-  mappend (x:.xs) (y:.ys) = correctOnce ((x+y):.mappend xs ys)
+  mempty  = zero
+  mappend = (+)
 
 instance KnownNat s => Applicative ((:.) s) where
   pure x                    = 1:.x
-  d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `rem` dimHead d) :. f x
+  d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `mod` dimHead d) :. f x
   (*>)                      = (>>)
   (<*)                      = flip (>>)
 
@@ -473,6 +544,7 @@ instance (Ranged (x:.xs), Num xs) => Ix.Ix (x:.xs) where
   inRange _     c = minBound <= c && c <= maxBound
   rangeSize (_,b) = size (proxyOf b)
 
+dimQQ :: ExpQ -> TypeQ -> QuasiQuoter
 dimQQ val ty =  QuasiQuoter
   { quoteExp  = \s -> [| $val :: $(quoteType dim s) |]
   , quoteType = \s ->
@@ -591,7 +663,7 @@ instance Range n => Range (Succ n) where
 
 {-# INLINE nextTagged #-}
 nextTagged :: Dim a => Tagged (Succ n) a -> Tagged n a
-nextTagged (Tagged a) = Tagged (next' a)
+nextTagged (Tagged a) = Tagged (next a)
 
 {-# INLINE nextTaggedI #-}
 nextTaggedI :: Tagged (Succ n) Int -> Tagged n Int
