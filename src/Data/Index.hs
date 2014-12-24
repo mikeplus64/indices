@@ -438,13 +438,14 @@ instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
   mappend (x:.xs) (y:.ys) = correctOnce ((x+y):.mappend xs ys)
 instance KnownNat s => Applicative ((:.) s) where
   pure x                    = 1:.x
-  d@(ix₁ :. f) <*> ix₂ :. x = ((ix₁*ix₂) `rem` dimHead d) :. f x
+  d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `rem` dimHead d) :. f x
   (*>)                      = (>>)
   (<*)                      = flip (>>)
+
 instance KnownNat s => Monad ((:.) s) where
   return x              = 1:.x
-  d@(ix₁:.a) >>= f      = case f a of
-    ix₂ :. b -> ((ix₁*ix₂) `mod` dimHead d) :. b
+  d@(ix0:.a) >>= f      = case f a of
+    ix1 :. b -> ((ix0*ix1) `mod` dimHead d) :. b
 
 instance Ix.Ix Z where
   {-# INLINE range #-}
