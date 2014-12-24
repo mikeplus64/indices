@@ -546,7 +546,7 @@ instance (Ranged (x:.xs), Num xs) => Ix.Ix (x:.xs) where
 
 dimQQ :: ExpQ -> TypeQ -> QuasiQuoter
 dimQQ val ty =  QuasiQuoter
-  { quoteExp  = \s -> [| $val :: $(quoteType dim s) |]
+  { quoteExp  = \s -> [| $val :: $(quoteType (dimQQ val ty) s) |]
   , quoteType = \s ->
       let cons a b = [t| $(litT $ numTyLit a) :. $b |]
           nil      = [t| Z |]
