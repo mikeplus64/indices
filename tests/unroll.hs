@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes, DataKinds, BangPatterns, TypeOperators, PolyKinds #-}
+{-# OPTIONS_GHC -fcontext-stack=100 #-}
 import Data.Index
 import Criterion.Main
 import Control.DeepSeq
@@ -8,51 +9,49 @@ instance NFData Z
 instance NFData b => NFData (a:.b) where
   rnf (a:.b) = a `seq` rnf b
 
-staticRange :: Ranged a => Proxy a -> [a]
-staticRange _ = srange
+{-# INLINE unrollRange #-}
+unrollRange :: Ranged a => Proxy a -> [a]
+unrollRange _ = range Unroll
 
-{-# NOINLINE staticRangeSlow #-}
-staticRangeSlow :: Ranged a => Proxy a -> [a]
-staticRangeSlow _ = srange
+{-# NOINLINE unrollRangeNoinline #-}
+unrollRangeNoinline :: Ranged a => Proxy a -> [a]
+unrollRangeNoinline _ = range Unroll
 
-runtimeRange :: Dim a => Proxy a -> [a]
-runtimeRange _ = range
+rollRange :: Dim a => Proxy a -> [a]
+rollRange _ = range Roll
 
-{-# NOINLINE runtimeRangeSlow #-}
-runtimeRangeSlow :: Dim a => Proxy a -> [a]
-runtimeRangeSlow _ = range
+{-# NOINLINE rollRangeNoinline #-}
+rollRangeNoinline :: Dim a => Proxy a -> [a]
+rollRangeNoinline _ = range Roll
 
 {-# NOINLINE test #-}
 test :: a -> IO ()
 test = return (return ())
 
-staticWithRange :: Ranged n => Proxy n -> IO ()
-staticWithRange r = swithRange r test
+{-# INLINE unrollWithRange #-}
+unrollWithRange :: Ranged n => Proxy n -> IO ()
+unrollWithRange r = withRange (unroll r) test
 
-{-# NOINLINE staticWithRangeSlow #-}
-staticWithRangeSlow :: Ranged n => Proxy n -> IO ()
-staticWithRangeSlow r = swithRange r test
+{-# NOINLINE unrollWithRangeNoinline #-}
+unrollWithRangeNoinline :: Ranged n => Proxy n -> IO ()
+unrollWithRangeNoinline r = withRange (unroll r) test
 
-runtimeWithRange :: Dim n => Proxy n -> IO ()
-runtimeWithRange r = withRange r test
+rollWithRange :: Dim n => Proxy n -> IO ()
+rollWithRange r = withRange (roll r) test
 
-{-# NOINLINE runtimeWithRangeSlow #-}
-runtimeWithRangeSlow :: Dim n => Proxy n -> IO ()
-runtimeWithRangeSlow r = withRange r test
+{-# NOINLINE rollWithRangeNoinline #-}
+rollWithRangeNoinline :: Dim n => Proxy n -> IO ()
+rollWithRangeNoinline r = withRange (roll r) test
 
 main :: IO ()
 main = defaultMain 
   [ bgroup "withRanges"
     [ benchWithRanges [dim|2 2|]
     , benchWithRanges [dim|4 4|]
-    , benchWithRanges [dim|8 8|]
-    , benchWithRanges [dim|16 16|]
     ]
   , bgroup "ranges"
     [ benchRanges [dim|2 2|]
     , benchRanges [dim|4 4|]
-    , benchRanges [dim|8 8|]
-    , benchRanges [dim|16 16|]
     ]
   ]
 
@@ -60,18 +59,18 @@ main = defaultMain
 benchWithRanges :: (Show r, NFData r, Ranged r) => Proxy r -> Benchmark
 benchWithRanges r
   = bgroup (show (reflect `asProxyTypeOf` r))
-    [ bench "runtimeWithRange" (runtimeWithRange r)
-    , bench "runtimeWithRangeSlow" (runtimeWithRangeSlow r)
-    , bench "staticWithRange" (staticWithRange r)
-    , bench "staticWithRangeSlow" (staticWithRangeSlow r)
+    [ bench "rollWithRange"           . whnfIO $ rollWithRange r
+    , bench "rollWithRangeNoinline"   . whnfIO $ rollWithRangeNoinline r
+    , bench "unrollWithRange"         . whnfIO $ unrollWithRange r
+    , bench "unrollWithRangeNoinline" . whnfIO $ unrollWithRangeNoinline r
     ]
 
 {-# INLINE benchRanges #-}
 benchRanges :: (Show r, NFData r, Ranged r) => Proxy r -> Benchmark
 benchRanges r
   = bgroup (show (reflect `asProxyTypeOf` r))
-    [ bench "runtimeRange" (runtimeRange `nf` r)
-    , bench "runtimeRangeSlow" (runtimeRangeSlow `nf` r)
-    , bench "staticRange" (staticRange `nf` r)
-    , bench "staticRangeSlow" (staticRangeSlow `nf` r)
+    [ bench "rollRange"            $ whnf rollRange r
+    , bench "rollRangeNoinline"    $ whnf rollRangeNoinline r
+    , bench "unrollRange"          $ whnf unrollRange r
+    , bench "unrollRangeNoinline"  $ whnf unrollRangeNoinline r
     ]
