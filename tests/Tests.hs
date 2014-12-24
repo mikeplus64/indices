@@ -1,12 +1,13 @@
-{-# LANGUAGE DataKinds     #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE QuasiQuotes         #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeOperators       #-}
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 module Main where
 import Data.Index
-import Data.Monoid
-import Test.QuickCheck
 import System.Exit
+import Test.QuickCheck
 
 type Index = 10:.10:.10:.Z
 
@@ -20,6 +21,7 @@ i10 :: Index -> Index
 i10 = id
 
 prop_maxBound = i10 maxBound == each 9
+
 prop_minBound = i10 minBound == each 0
 
 prop_plusZero = i10 zero == zero + 0
@@ -69,7 +71,7 @@ prop_rangeIndicesToIndexUnrolled =
 prop_fromIndexIndices =
   map fromIndex (foldrRangeIndices (roll ix) (:) []) ==
   foldrRange (roll ix) (:) []
-       
+
 return []
 
 main :: IO ()
