@@ -33,7 +33,6 @@ module Data.Index
        , size
        , rank
        , correct
-       , reflect
        , toIndex
        , fromIndex
        , next
@@ -124,14 +123,6 @@ class Ord n => Dim n where
   -- | The size of the index
   size         :: proxy n -> Int
 
-  -- | Reify a type-level index into a value-level one
-  reflect'     :: proxy n -> n
-
-  -- | Reify a type-level index into a value-level one
-  {-# INLINE reflect #-}
-  reflect      :: n
-  reflect      = reflect' Proxy
-
   -- | Increment by one. Wraps around to 'minBound' when 'maxBound' is given.
   next         :: n -> n
 
@@ -178,7 +169,6 @@ instance Dim Z where
   {-# INLINE each #-}
   {-# INLINE rank #-}
   {-# INLINE size #-}
-  {-# INLINE reflect' #-}
   {-# INLINE next #-}
   {-# INLINE prev #-}
   {-# INLINE toIndex #-}
@@ -193,7 +183,6 @@ instance Dim Z where
   each         _ = Z
   rank         _ = 0
   size         _ = 1
-  reflect'     _ = Z
   next         _ = error "next: Z"
   prev         _ = error "prev: Z"
   toIndex      _ = 0
@@ -211,7 +200,6 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   {-# INLINE each #-}
   {-# INLINE rank #-}
   {-# INLINE size #-}
-  {-# INLINE reflect' #-}
   {-# INLINE next #-}
   {-# INLINE prev #-}
   {-# INLINE toIndex #-}
@@ -233,7 +221,6 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
 
   size d = pdimHead d * size (pdimTail d)
 
-  reflect' d = pdimHead d :. reflect' (pdimTail d)
 
   next d@(x:.xs)
     | x < dimHead d - 1 = (x+1) :. xs
