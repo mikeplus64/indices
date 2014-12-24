@@ -540,6 +540,14 @@ type family Size (dim :: *) :: Nat where
   Size (x:.Z)  = x
   Size (x:.xs) = x * Size xs
 
+type family InRange (a :: *) (b :: *) :: Bool where
+  InRange Z       Z       = True
+  InRange (x:.xs) (y:.ys) = And (x <=? y) (InRange xs ys)
+
+type family And (a :: Bool) (b :: Bool) :: Bool where
+  And True True = True
+  And a    b    = False
+
 class Range (n :: Peano) where
   swithRange_  :: (Dim o, Applicative m) => Tagged n o -> (o -> m ()) -> m ()
   sfoldrRange_ :: Dim o => Tagged n o -> (o -> b -> b) -> b -> b
