@@ -29,6 +29,7 @@
 --
 module Data.Index
   ( -- * Core
+    Dim(zero,unit,size,rank,correct,reflect,zipMin,toIndex,fromIndex,next'
        ,prev')
   , Rank(..)
   , (:.)(..), Z(..)
