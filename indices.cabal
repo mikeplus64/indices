@@ -48,12 +48,15 @@ library
   default-language:    Haskell2010
   ghc-options:         -Wall
 
-test-suite tests
-  hs-source-dirs:      tests
-  main-is:             Tests.hs 
+benchmark unroll
+  hs-source-dirs:      benchmarks
+  main-is:             Unroll.hs 
   type:                exitcode-stdio-1.0
   build-depends:       base >=4.7 && <5.0
                      , indices >= 1.6.0
-                     , QuickCheck
+                     , criterion
+  default-language:    Haskell2010
+
+
   
 
