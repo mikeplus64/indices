@@ -199,9 +199,9 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   size             d = pdimHead d * size (pdimTail d)
   reflect'         d = pdimHead d :. reflect' (pdimTail d)
   next d@(x:.xs)
-    | x < dimHead d - 1         = (x+1) :. xs
+    | x < dimHead d - 1          = (x+1) :. xs
     | xs' <- next xs, xs' > zero = 0 :. xs'
-    | otherwise                 = error "next: index already at maxBound"
+    | otherwise                  = error "next: index already at maxBound"
   prev (x:.xs)
     | x > 0     = (x-1) :. xs
     | xs > zero = 0 :. prev xs
@@ -319,6 +319,7 @@ instance Num Z where
   signum      _ = Z
   abs         _ = Z
   fromInteger _ = Z
+
 instance (Num xs, Dim (x:.xs)) => Num (x:.xs) where
   {-# INLINE (+) #-}
   {-# INLINE (-) #-}
@@ -328,19 +329,21 @@ instance (Num xs, Dim (x:.xs)) => Num (x:.xs) where
   {-# INLINE abs #-}
   {-# INLINE fromInteger #-}
   x:.xs + y:.ys  = correctOnce ((x+y) :. (xs+ys))
-  -- amusingly stylish-haskell thinks this is N+K patterns
   x:.xs - y:.ys  = correctOnce ((x-y) :. (xs-ys))
   x:.xs * y:.ys  = correctOnce ((x*y) :. (xs*ys))
   negate (x:.xs) = negate x :. negate xs
   signum (x:.xs) = signum x :. signum xs
   abs (x:.xs)    = abs x    :. abs xs
   fromInteger    = fromIndex . fromIntegral
+
 instance Real Z where
   {-# INLINE toRational #-}
   toRational _ = 0
+
 instance (Num (x:.xs), Dim (x:.xs)) => Real (x:.xs) where
   {-# INLINE toRational #-}
   toRational = toRational . toIndex
+
 instance Enum Z where
   {-# INLINE toEnum #-}
   {-# INLINE fromEnum #-}
@@ -395,6 +398,7 @@ instance Integral Z where
   quotRem _ _ = (Z, Z)
   divMod  _ _ = (Z, Z)
   toInteger _ = 0
+
 instance (Integral xs, Dim (x:.xs)) => Integral (x:.xs) where
   {-# INLINE div #-}
   {-# INLINE mod #-}
@@ -410,11 +414,13 @@ instance (Integral xs, Dim (x:.xs)) => Integral (x:.xs) where
   quotRem xs ys        = (quot xs ys, rem xs ys)
   divMod xs ys         = (div xs ys, mod xs ys)
   toInteger            = toInteger . toIndex
+
 instance Bounded Z where
   {-# INLINE minBound #-}
   {-# INLINE maxBound #-}
   minBound = Z
   maxBound = Z
+
 instance Dim (x:.xs) => Bounded (x:.xs) where
   {-# INLINE minBound #-}
   {-# INLINE maxBound #-}
@@ -426,11 +432,13 @@ instance Monoid Z where
   {-# INLINE mappend #-}
   mempty           = Z
   mappend _ _ = Z
+
 instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
   {-# INLINE mempty #-}
   {-# INLINE mappend #-}
   mempty                  = zero
   mappend (x:.xs) (y:.ys) = correctOnce ((x+y):.mappend xs ys)
+
 instance KnownNat s => Applicative ((:.) s) where
   pure x                    = 1:.x
   d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `rem` dimHead d) :. f x
@@ -558,16 +566,19 @@ instance Range n => Range (Succ n) where
   {-# INLINE swithRange_ #-}
   {-# INLINE sfoldrRange_ #-}
   {-# INLINE sfoldlRange_ #-}
-  swithRange_  !i f    = f (unTagged i) *> swithRange_ (nextTagged i) f
-  sfoldrRange_  i f  z = f (unTagged i) (sfoldrRange_ (nextTagged i) f z)
+  swithRange_ !i f = f (unTagged i) *> swithRange_ (nextTagged i) f
+  sfoldrRange_ i f z = f (unTagged i) (sfoldrRange_ (nextTagged i) f z)
   sfoldlRange_ !i f !z = sfoldlRange_ (nextTagged i) f (f z (unTagged i))
 
   {-# INLINE swithRangeIndices_ #-}
   {-# INLINE sfoldrRangeIndices_ #-}
   {-# INLINE sfoldlRangeIndices_ #-}
-  swithRangeIndices_  !i f    = f (unTagged i) *> swithRangeIndices_ (nextTaggedI i) f
-  sfoldrRangeIndices_  i f  z = f (unTagged i) (sfoldrRangeIndices_ (nextTaggedI i) f z)
-  sfoldlRangeIndices_ !i f !z = sfoldlRangeIndices_ (nextTaggedI i) f (f z (unTagged i))
+  swithRangeIndices_ !i f = f (unTagged i) *> swithRangeIndices_ (nextTaggedI i) f
+  sfoldrRangeIndices_ i f z =
+    f (unTagged i) (sfoldrRangeIndices_ (nextTaggedI i) f z)
+
+  sfoldlRangeIndices_ !i f !z =
+    sfoldlRangeIndices_ (nextTaggedI i) f (f z (unTagged i))
 
 {-# INLINE nextTagged #-}
 nextTagged :: Dim a => Tagged (Succ n) a -> Tagged n a
