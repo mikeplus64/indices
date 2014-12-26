@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                indices
-version:             1.6.1
+version:             1.6.2
 synopsis:            Static indices
 -- description:         
 license:             MIT
