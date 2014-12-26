@@ -13,12 +13,12 @@
 {-# LANGUAGE PatternGuards         #-}
 {-# LANGUAGE PolyKinds             #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE StandaloneDeriving    #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE UndecidableInstances  #-}
-{-# LANGUAGE StandaloneDeriving  #-}
 -- | The indices supplied by this module are static type and value-level linked
 -- lists. Since their type gives us information about them, recursion on indices
 -- can be unrolled easily.
