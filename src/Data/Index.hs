@@ -1,21 +1,21 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE BangPatterns          #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE DeriveDataTypeable    #-}
+{-# LANGUAGE DeriveFoldable        #-}
+{-# LANGUAGE DeriveFunctor         #-}
+{-# LANGUAGE DeriveGeneric         #-}
+{-# LANGUAGE DeriveTraversable     #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternGuards         #-}
+{-# LANGUAGE PolyKinds             #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE UndecidableInstances  #-}
 -- | The indices supplied by this module are static type and value-level linked
 -- lists. Since their type gives us information about them, recursion on indices
 -- can be unrolled easily.
@@ -46,7 +46,7 @@ module Data.Index
     -- * Using ranges
   , foldlRange
   , foldrRange
-  , withRange 
+  , withRange
     -- ** Over 'Int' indices
   , foldlRangeIndices
   , foldrRangeIndices
@@ -70,18 +70,18 @@ module Data.Index
   , module Data.Proxy
   ) where
 
-import GHC.Generics
-import GHC.TypeLits
-import Data.Proxy
-import Data.Tagged
-import qualified Data.Ix as Ix
-import Data.Monoid (Monoid(..))
-import Data.Data (Typeable, Data)
-import Data.Foldable (Foldable)
-import Data.Traversable (Traversable)
-import Control.Applicative
-import Language.Haskell.TH hiding (Range(..))
-import Language.Haskell.TH.Quote
+import           Control.Applicative
+import           Data.Data                 (Data, Typeable)
+import           Data.Foldable             (Foldable)
+import qualified Data.Ix                   as Ix
+import           Data.Monoid               (Monoid (..))
+import           Data.Proxy
+import           Data.Tagged
+import           Data.Traversable          (Traversable)
+import           GHC.Generics
+import           GHC.TypeLits
+import           Language.Haskell.TH       hiding (Range (..))
+import           Language.Haskell.TH.Quote
 
 -- | Index constructor, analogous to ':'
 --
@@ -128,7 +128,7 @@ zero = each 0
 class (Bounded n, Ord n) => Dim n where
   -- | @each n@ = an index of all 'n'
   each         :: Int -> n
-  
+
   -- | The number of dimensions in an index
   rank         :: n -> Int
 
@@ -195,9 +195,9 @@ instance Dim Z where
 
   {-# INLINE toIndex #-}
   toIndex      _ = 0
-  
+
   {-# INLINE fromIndex' #-}
-  fromIndex' _ i | i > 0      = error "fromIndex: index too large" 
+  fromIndex' _ i | i > 0      = error "fromIndex: index too large"
                  | otherwise  = Z
 
   {-# INLINE correct #-}
@@ -223,7 +223,7 @@ instance Dim Z where
 
 instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   {-# INLINE each #-}
-  each a 
+  each a
     | 0 <= a && a < dimHead d = d
     | otherwise               = error "each: out of range"
    where
@@ -251,18 +251,18 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   toIndex   d@(x:.xs) = x + dimHead d * toIndex xs
 
   {-# INLINE fromIndex' #-}
-  fromIndex' d = \ix -> (ix `mod` h) :. fromIndex' (pdimTail d) (ix `div` h) 
+  fromIndex' d = \ix -> (ix `mod` h) :. fromIndex' (pdimTail d) (ix `div` h)
     where h = pdimHead d
 
   {-# INLINE correct #-}
-  correct d@(x:.xs) 
+  correct d@(x:.xs)
     | 0 <= x && x < dimHead d = x:.correct xs
-    | otherwise               = error "correct: index not in range" 
+    | otherwise               = error "correct: index not in range"
 
   {-# INLINE correctOnce #-}
-  correctOnce d@(x:.xs) 
+  correctOnce d@(x:.xs)
     | 0 <= x && x < dimHead d = x:.xs
-    | otherwise               = error "correctOnce: index not in range" 
+    | otherwise               = error "correctOnce: index not in range"
 
   {-# INLINE lastDim #-}
   lastDim d = (pdimHead d - 1) :. lastDim (pdimTail d)
@@ -572,7 +572,7 @@ dimQQ val ty =  QuasiQuoter
   , quotePat  = error "dim in pattern context"
   , quoteDec  = error "dim in declaration context"
   }
-                            
+
 -- | Expands to a 'Proxy' with the phantom type being the dimension specified.
 -- Works in types and expressions.
 --
@@ -660,7 +660,7 @@ instance Range Zero where
   swithRangeIndices_  _ _    = pure ()
   sfoldrRangeIndices_ _ _  z = z
   sfoldlRangeIndices_ _ _ !z = z
-  
+
 instance Range n => Range (Succ n) where
   {-# INLINE swithRange_ #-}
   {-# INLINE sfoldrRange_ #-}
