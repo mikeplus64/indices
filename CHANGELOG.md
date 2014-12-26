@@ -1,3 +1,13 @@
+1.7.0
+-----
+* Ensure things get inlined by removing recursive dependencies between 'Dim' and 'Bounded'
+* Remove value-level :.
+* Add .: for safe construction of indices
+
+1.6.3
+-----
+Added 'Bounded' constraint to 'Dim'
+
 1.6.2
 -----
 Added this changelog.
