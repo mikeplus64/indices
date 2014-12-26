@@ -44,6 +44,8 @@ library
                      , tagged >=0.7
                      , template-haskell >=2.9
 
+  extra-source-files:  changelog.md
+
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -Wall

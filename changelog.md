@@ -1,0 +1,20 @@
+1.6.2
+-----
+Added this changelog.
+
+1.6.1
+-----
+* Remove 'reflect' entirely.
+* Relax dependencies
+
+1.6.0
+-----
+* Added QuasiQuoters for Unroll and Roll
+* New 'Mode' type to specify whether you want unrolled or normal loops
+* Removed "s" prefixed functions
+* Fix Ix instance
+* Reduce duplication
+
+1.5.0
+-----
+Initial Hackage release.
