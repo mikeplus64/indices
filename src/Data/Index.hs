@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns          #-}
-{-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveDataTypeable    #-}
 {-# LANGUAGE DeriveFoldable        #-}
@@ -43,36 +42,17 @@ module Data.Index
        , lastDim)
   , zero
   , Rank(..)
-  , (:.)(..), dimHead, dimTail, Z(..)
-  , (.:)
+  , (:.), (.:), dimHead, dimTail, Z(..)
     -- * Selecting whether to unroll loops
   , Mode(..), roll, unroll, modeProxy
     -- * Using ranges
-
-    -- *** For monadic/applicative code
-  , withRange
-  , withRangeFrom
-  , withRangeHalves
-  , forRange 
-
-    -- *** Folds
   , foldlRange
-  , foldlRangeFrom
   , foldrRange
-  , foldrRangeFrom
-
+  , withRange
     -- ** Over 'Int' indices
-    -- *** For monadic/applicative code
-  , withRangeIndices
-  , withRangeIndicesFrom
-  , forRangeIndices
-
-    -- *** Folds
   , foldlRangeIndices
-  , foldlRangeIndicesFrom
   , foldrRangeIndices
-  , foldrRangeIndicesFrom
-
+  , withRangeIndices
     -- * Range types
   , Ranged
   , InRange
@@ -81,7 +61,6 @@ module Data.Index
   , ToPeano
   , Size
     -- * Utility
-  , split
   , showBound
   , bounds
   , range
@@ -119,7 +98,7 @@ infixr 9 :.
 -- | Construct an index. This ensures that all constructed indices are valid by
 -- taking the remainder. Negative indices go to 0.
 (.:) :: forall x xs. KnownNat x => Int -> xs -> x:.xs
-(.:) x xs = (x `rem` cnat (Proxy :: Proxy x)) :. xs
+(.:) x xs = (x `quot` cnat (Proxy :: Proxy x)) :. xs
 
 infixr 9 .:
 
@@ -314,8 +293,6 @@ data Mode :: * -> * where
   Unroll :: Ranged i => Mode i
   Roll   :: Dim i => Mode i
 
-deriving instance Show (Mode a)
-
 -- | You might prefer to use 'dimu'
 {-# INLINE unroll #-}
 unroll :: Ranged a => Proxy a -> Mode a
@@ -342,21 +319,8 @@ proxyOf = const Proxy
 {-# INLINE foldrRange #-}
 -- | Lazy right fold over a range.
 foldrRange :: Mode n -> (n -> b -> b) -> b -> b
-foldrRange Unroll = foldrRangeFrom Unroll zero
-foldrRange Roll   = foldrRangeFrom Roll   zero
--- we have to match on the Mode here to get the Dim/Ranged instances
-
-{-# INLINE foldlRange #-}
--- | Eager left fold over a range.
-foldlRange :: Mode n -> (b -> n -> b) -> b -> b
-foldlRange Unroll = foldlRangeFrom Unroll zero
-foldlRange Roll   = foldlRangeFrom Roll   zero
-
-{-# INLINE foldrRangeFrom #-}
--- | Lazy right fold over a range from a given index.
-foldrRangeFrom :: Mode n -> n -> (n -> b -> b) -> b -> b
-foldrRangeFrom Unroll s cons nil = sfoldrRange_ (tagPeano s) cons nil
-foldrRangeFrom Roll   s cons nil = go s
+foldrRange Unroll cons nil = sfoldrRange_ (tagPeano zero) cons nil
+foldrRange Roll   cons nil = go zero
  where
   top = lastDim Proxy -- hopefully make sure this isn't recomputed
   {-# INLINE go #-}
@@ -364,11 +328,11 @@ foldrRangeFrom Roll   s cons nil = go s
     | i < top   = i `cons` go (next i)
     | otherwise = cons top nil
 
-{-# INLINE foldlRangeFrom #-}
--- | Lazy right fold over a range from a given index.
-foldlRangeFrom :: Mode n -> n -> (b -> n -> b) -> b -> b
-foldlRangeFrom Unroll s f = sfoldlRange_ (tagPeano s) f
-foldlRangeFrom Roll   s f = go s
+{-# INLINE foldlRange #-}
+-- | Lazy right fold over a range.
+foldlRange :: Mode n -> (b -> n -> b) -> b -> b
+foldlRange Unroll f = sfoldlRange_ (tagPeano zero) f
+foldlRange Roll   f = go zero
  where
   top = lastDim Proxy -- hopefully make sure this isn't recomputed
   go !i !acc
@@ -378,25 +342,13 @@ foldlRangeFrom Roll   s f = go s
 {-# INLINE withRange #-}
 -- | Compute something from a range
 withRange :: Applicative m => Mode a -> (a -> m ()) -> m ()
-withRange m f = foldrRange m (\d acc -> f d *> acc) (pure ())
-
-{-# INLINE withRangeFrom #-}
--- | Compute something from a range, from an index.
-withRangeFrom :: Applicative m => Mode a -> a -> (a -> m ()) -> m ()
-withRangeFrom m z f = foldrRangeFrom m z (\d acc -> f d *> acc) (pure ())
+withRange m f = foldrRange m (\d acc -> acc *> f d) (pure ())
 
 {-# INLINE foldlRangeIndices #-}
 -- | Strict left fold over the /raw/ 'Int' indices under a range
 foldlRangeIndices :: Mode n -> (b -> Int -> b) -> b -> b
-foldlRangeIndices m@Unroll = foldlRangeIndicesFrom m 0
-foldlRangeIndices m@Roll   = foldlRangeIndicesFrom m 0
-
-{-# INLINE foldlRangeIndicesFrom #-}
--- | Strict left fold over the /raw/ 'Int' indices under a range, from an index.
-foldlRangeIndicesFrom :: Mode n -> Int -> (b -> Int -> b) -> b -> b
-foldlRangeIndicesFrom m@Unroll z cons =
-  sfoldlRangeIndices_ (Tagged z `asTypeOf` tagPeanoI m) cons
-foldlRangeIndicesFrom m@Roll   z cons = go z
+foldlRangeIndices m@Unroll cons = sfoldlRangeIndices_ (tagPeanoI m) cons
+foldlRangeIndices m@Roll   cons = go 0
   where
     s = size m
     go !i !acc
@@ -406,15 +358,8 @@ foldlRangeIndicesFrom m@Roll   z cons = go z
 {-# INLINE foldrRangeIndices #-}
 -- | Lazy right fold over the /raw/ 'Int' indices under a range
 foldrRangeIndices :: Mode n -> (Int -> b -> b) -> b -> b
-foldrRangeIndices m@Unroll = foldrRangeIndicesFrom m 0
-foldrRangeIndices m@Roll   = foldrRangeIndicesFrom m 0
-
-{-# INLINE foldrRangeIndicesFrom #-}
--- | Lazy right fold over the /raw/ 'Int' indices under a range, from an index.
-foldrRangeIndicesFrom :: Mode n -> Int -> (Int -> b -> b) -> b -> b
-foldrRangeIndicesFrom m@Unroll z cons nil =
-  sfoldrRangeIndices_ (Tagged z `asTypeOf` tagPeanoI m) cons nil
-foldrRangeIndicesFrom m@Roll   z cons nil = go z
+foldrRangeIndices m@Unroll cons nil = sfoldrRangeIndices_ (tagPeanoI m) cons nil
+foldrRangeIndices m@Roll   cons nil = go 0
   where
     s = size m
     go !i
@@ -424,13 +369,7 @@ foldrRangeIndicesFrom m@Roll   z cons nil = go z
 {-# INLINE withRangeIndices #-}
 -- | Compute something using the /raw/ indices under a range
 withRangeIndices :: Applicative m => Mode n -> (Int -> m ()) -> m ()
-withRangeIndices m f = foldrRangeIndices m (\d acc -> f d *> acc) (pure ())
-
-{-# INLINE withRangeIndicesFrom #-}
--- | Compute something using the /raw/ indices under a range
-withRangeIndicesFrom :: Applicative m => Mode n -> Int -> (Int -> m ()) -> m ()
-withRangeIndicesFrom m n f =
-  foldrRangeIndicesFrom m n (\d acc -> f d *> acc) (pure ())
+withRangeIndices m f = foldrRangeIndices m (\d acc -> acc *> f d) (pure ())
 
 {-# INLINE zipMod #-}
 zipMod :: Dim n => (Int -> Int -> Int) -> n -> n -> n
@@ -702,30 +641,40 @@ type family And (a :: Bool) (b :: Bool) :: Bool where
   And a    b    = False
 
 class Range (n :: Peano) where
+  swithRange_  :: (Dim o, Applicative m) => Tagged n o -> (o -> m ()) -> m ()
   sfoldrRange_ :: Dim o => Tagged n o -> (o -> b -> b) -> b -> b
   sfoldlRange_ :: Dim o => Tagged n o -> (b -> o -> b) -> b -> b
 
+  swithRangeIndices_  :: Applicative m => Tagged n Int -> (Int -> m ()) -> m ()
   sfoldrRangeIndices_ :: Tagged n Int -> (Int -> b -> b) -> b -> b
   sfoldlRangeIndices_ :: Tagged n Int -> (b -> Int -> b) -> b -> b
 
 instance Range Zero where
+  {-# INLINE swithRange_ #-}
   {-# INLINE sfoldrRange_ #-}
   {-# INLINE sfoldlRange_ #-}
+  swithRange_  _ _   = pure ()
   sfoldrRange_ _ _ z = z
   sfoldlRange_ _ _ z = z
+  {-# INLINE swithRangeIndices_ #-}
   {-# INLINE sfoldrRangeIndices_ #-}
   {-# INLINE sfoldlRangeIndices_ #-}
+  swithRangeIndices_  _ _    = pure ()
   sfoldrRangeIndices_ _ _  z = z
   sfoldlRangeIndices_ _ _ !z = z
 
 instance Range n => Range (Succ n) where
+  {-# INLINE swithRange_ #-}
   {-# INLINE sfoldrRange_ #-}
   {-# INLINE sfoldlRange_ #-}
+  swithRange_ !i f = f (unTagged i) *> swithRange_ (nextTagged i) f
   sfoldrRange_ i f z = f (unTagged i) (sfoldrRange_ (nextTagged i) f z)
   sfoldlRange_ !i f !z = sfoldlRange_ (nextTagged i) f (f z (unTagged i))
 
+  {-# INLINE swithRangeIndices_ #-}
   {-# INLINE sfoldrRangeIndices_ #-}
   {-# INLINE sfoldlRangeIndices_ #-}
+  swithRangeIndices_ !i f = f (unTagged i) *> swithRangeIndices_ (nextTaggedI i) f
   sfoldrRangeIndices_ i f z =
     f (unTagged i) (sfoldrRangeIndices_ (nextTaggedI i) f z)
 
@@ -756,68 +705,3 @@ bounds _ = (zero, maxBound)
 cnat :: KnownNat n => proxy (n :: Nat) -> Int
 cnat = fromInteger . natVal
 
-{-# INLINE forRange #-}
--- | Similar to an imperative for loop.
-forRange :: Monad m => Mode i -> (i -> m Bool) -> (i -> m ()) -> m ()
-forRange mode check f = foldrRange mode r (return ())
- where
-  {-# INLINE r #-}
-  r ix acc = do
-    ok <- check ix
-    if ok
-      then f ix >> acc
-      else acc
-
-{-# INLINE forRangeIndices #-}
--- | Similar to an imperative for loop.
-forRangeIndices :: Monad m => Mode i -> (Int -> m Bool) -> (Int -> m ()) -> m ()
-forRangeIndices mode check f = foldrRangeIndices mode r (return ())
- where
-  {-# INLINE r #-}
-  r ix acc = do
-    ok <- check ix
-    if ok
-      then f ix >> acc
-      else acc
-
-type family FromPeano (n :: Peano) :: Nat where
-  FromPeano (Succ n) = 1 + FromPeano n
-  FromPeano Zero     = 0
-
-type family (=?) a b then_ else_ where
-  (a =? a) then_ else_ = then_
-  (a =? b) then_ else_ = else_
-
-type family HalfQuot (x :: Peano) (y :: Peano) where
-  HalfQuot (Succ x) y =
-    (Succ x =? y)
-    (Succ x)
-    ((x =? y) y (HalfQuot x (Succ y)))
-  HalfQuot a b = b
-
-type family Half (dim :: *) where
-  Half (x:.Z)  = FromPeano (HalfQuot (ToPeano x) Zero) :. Z
-  Half (x:.xs) = x :. Half xs
-  Half Z       = Z
-
-split
-  :: Ranged (Half n)
-  => Mode n
-  -> (Mode (Half n), Mode n)
-split Unroll = (Unroll, Unroll)
-split Roll   = (Roll, Roll)
-
-{-# INLINE withRangeHalves #-}
-withRangeHalves
-  :: (Dim n, Ranged (Half n), Rank (Half n) n, Applicative m)
-  => Mode n
-  -> (Half n -> m ()) -- ^ Function to run on first half
-  -> (n -> m ())      -- ^ Function to run on second half
-  -> m ()
-withRangeHalves s fl fr =
-  withRange l fl
-  *> withRangeFrom r (next (setBound (maxBound `asModeOf` l))) fr
- where (l, r) = split s
-
-asModeOf :: a -> proxy a -> a
-asModeOf a _ = a
