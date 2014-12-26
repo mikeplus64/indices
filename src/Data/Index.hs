@@ -650,21 +650,27 @@ type family HalfQuot (x :: Peano) (y :: Peano) where
     ((x =? y) y (HalfQuot x (Succ y)))
   HalfQuot a b = b
 
-type HalfQ a = FromPeano (HalfQuot (ToPeano a) Zero)
+-- use helpers here to hopefully trick ghc into not recomputing some bits
+-- such as 'halfX', since we can't explicitly just bind something in a type
+-- family
+type Half0 (x :: Nat) (xp :: Peano) xs =
+  Half1 x xp (FromPeano (HalfQuot xp Zero)) xs
 
-type HalfHelper (xp :: Peano) (halfX :: Nat) xs =
+type Half1 (x :: Nat) (xp :: Peano) (halfX :: Nat) xs =
   (HalfRem xp =? 0)
-  (halfX :. xs)
-  (halfX :. Half xs)
+  (halfX * Size xs)
+  (x     * Half xs)
 
-type family Half (dim :: *) where
-  Half (x:.xs) = HalfHelper (ToPeano x) (HalfQ x) xs 
-  Half Z       = Z
+-- | Produce an index half the size of the input.
+-- The result of this is the number where the /half/ index occurs.
+type family Half (dim :: *) :: Nat where
+  Half (x:.xs) = Half0 x (ToPeano x) xs
+  Half Z       = 1
 
 -- | Compute the size of an index
 type family Size (dim :: *) :: Nat where
-  Size (x:.Z)  = x
   Size (x:.xs) = x * Size xs
+  Size Z       = 1
 
 type family InRange (a :: *) (b :: *) :: Bool where
   InRange Z       Z       = True
