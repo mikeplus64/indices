@@ -113,7 +113,7 @@ instance Rank xs ys => Rank (x:.xs) (y:.ys) where
 zero :: Dim a => a
 zero = each 0
   
-class Ord n => Dim n where
+class (Bounded n, Ord n) => Dim n where
   -- | @each n@ = an index of all 'n'
   each         :: Int -> n
   
@@ -243,7 +243,6 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   correctOnce d@(x:.xs) 
     | 0 <= x && x < dimHead d = x:.xs
     | otherwise               = error "correctOnce: index not in range" 
-
 
   lastDim d = (pdimHead d - 1) :. lastDim (pdimTail d)
 
