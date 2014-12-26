@@ -57,16 +57,19 @@ module Data.Index
   , Ranged
   , InRange
   , Range()
+  , Size
+    -- * Type functions
+  , Half
+    -- * Peano numbers
   , Peano(..)
   , ToPeano
-  , Size
+  , FromPeano
     -- * Utility
   , showBound
   , bounds
   , range
   , pdimHead, pdimTail
   , cnat
-  , And
     -- * Syntax
   , dim, dimu, dimr
   , module Data.Proxy
@@ -119,7 +122,7 @@ instance Rank Z Z where
   setBound _ = Z
 
 -- | Rank
-instance Rank xs ys => Rank (x:.xs) (y:.ys) where
+instance (y <= x, Rank xs ys) => Rank (x:.xs) (y:.ys) where
   {-# INLINE setBound #-}
   setBound (x:.xs) = x:.setBound xs
 
@@ -627,6 +630,37 @@ type family ToPeano (n :: Nat) :: Peano where
   ToPeano 0 = Zero
   ToPeano n = Succ (ToPeano (n-1))
 
+type family FromPeano (n :: Peano) :: Nat where
+  FromPeano (Succ n) = 1 + FromPeano n
+  FromPeano Zero = 0
+
+type family (=?) a b then_ else_ where
+  (a =? a) then_ else_ = then_
+  (a =? b) then_ else_ = else_
+
+type family HalfRem (x :: Peano) :: Nat where
+  HalfRem (Succ (Succ a)) = HalfRem a
+  HalfRem (Succ Zero)     = 1
+  HalfRem Zero            = 0
+
+type family HalfQuot (x :: Peano) (y :: Peano) where
+  HalfQuot (Succ x) y =
+    (Succ x =? y)
+    (Succ x)
+    ((x =? y) y (HalfQuot x (Succ y)))
+  HalfQuot a b = b
+
+type HalfQ a = FromPeano (HalfQuot (ToPeano a) Zero)
+
+type HalfHelper (xp :: Peano) (halfX :: Nat) xs =
+  (HalfRem xp =? 0)
+  (halfX :. xs)
+  (halfX :. Half xs)
+
+type family Half (dim :: *) where
+  Half (x:.xs) = HalfHelper (ToPeano x) (HalfQ x) xs 
+  Half Z       = Z
+
 -- | Compute the size of an index
 type family Size (dim :: *) :: Nat where
   Size (x:.Z)  = x
@@ -641,40 +675,31 @@ type family And (a :: Bool) (b :: Bool) :: Bool where
   And a    b    = False
 
 class Range (n :: Peano) where
-  swithRange_  :: (Dim o, Applicative m) => Tagged n o -> (o -> m ()) -> m ()
   sfoldrRange_ :: Dim o => Tagged n o -> (o -> b -> b) -> b -> b
   sfoldlRange_ :: Dim o => Tagged n o -> (b -> o -> b) -> b -> b
 
-  swithRangeIndices_  :: Applicative m => Tagged n Int -> (Int -> m ()) -> m ()
   sfoldrRangeIndices_ :: Tagged n Int -> (Int -> b -> b) -> b -> b
   sfoldlRangeIndices_ :: Tagged n Int -> (b -> Int -> b) -> b -> b
 
 instance Range Zero where
-  {-# INLINE swithRange_ #-}
   {-# INLINE sfoldrRange_ #-}
   {-# INLINE sfoldlRange_ #-}
-  swithRange_  _ _   = pure ()
   sfoldrRange_ _ _ z = z
   sfoldlRange_ _ _ z = z
-  {-# INLINE swithRangeIndices_ #-}
+
   {-# INLINE sfoldrRangeIndices_ #-}
   {-# INLINE sfoldlRangeIndices_ #-}
-  swithRangeIndices_  _ _    = pure ()
   sfoldrRangeIndices_ _ _  z = z
   sfoldlRangeIndices_ _ _ !z = z
 
 instance Range n => Range (Succ n) where
-  {-# INLINE swithRange_ #-}
   {-# INLINE sfoldrRange_ #-}
   {-# INLINE sfoldlRange_ #-}
-  swithRange_ !i f = f (unTagged i) *> swithRange_ (nextTagged i) f
   sfoldrRange_ i f z = f (unTagged i) (sfoldrRange_ (nextTagged i) f z)
   sfoldlRange_ !i f !z = sfoldlRange_ (nextTagged i) f (f z (unTagged i))
 
-  {-# INLINE swithRangeIndices_ #-}
   {-# INLINE sfoldrRangeIndices_ #-}
   {-# INLINE sfoldlRangeIndices_ #-}
-  swithRangeIndices_ !i f = f (unTagged i) *> swithRangeIndices_ (nextTaggedI i) f
   sfoldrRangeIndices_ i f z =
     f (unTagged i) (sfoldrRangeIndices_ (nextTaggedI i) f z)
 
