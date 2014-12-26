@@ -98,7 +98,7 @@ infixr 9 :.
 -- | Construct an index. This ensures that all constructed indices are valid by
 -- taking the remainder. Negative indices go to 0.
 (.:) :: forall x xs. KnownNat x => Int -> xs -> x:.xs
-(.:) x xs = (x `quot` cnat (Proxy :: Proxy x)) :. xs
+(.:) x xs = (x `rem` cnat (Proxy :: Proxy x)) :. xs
 
 infixr 9 .:
 
