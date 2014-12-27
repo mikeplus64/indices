@@ -42,7 +42,7 @@ module Data.Index
        , lastDim)
   , zero
   , Rank(..)
-  , (:.), (.:), dimHead, dimTail, Z(..)
+  , (:.)(..), (.:), dimHead, dimTail, Z(..)
     -- * Selecting whether to unroll loops
   , Mode(..), roll, unroll, modeProxy
     -- * Using ranges
@@ -58,13 +58,12 @@ module Data.Index
   , InRange
   , Range()
   , Size
-    -- * Type functions
-  , Median
     -- * Peano numbers
   , Peano(..)
   , ToPeano
   , FromPeano
     -- * Utility
+  , splitIndices
   , showBound
   , bounds
   , range
@@ -122,7 +121,7 @@ instance Rank Z Z where
   setBound _ = Z
 
 -- | Rank
-instance (y <= x, Rank xs ys) => Rank (x:.xs) (y:.ys) where
+instance (x <= y, Rank xs ys) => Rank (x:.xs) (y:.ys) where
   {-# INLINE setBound #-}
   setBound (x:.xs) = x:.setBound xs
 
@@ -184,38 +183,37 @@ class (Bounded n, Ord n) => Dim n where
 
 instance Dim Z where
   {-# INLINE each #-}
-  each         _ = Z
+  each _ = Z
 
   {-# INLINE rank #-}
-  rank         _ = 0
+  rank _ = 0
 
   {-# INLINE size #-}
-  size         _ = 1
+  size _ = 1
 
   {-# INLINE next #-}
-  next         _ = error "next: Z"
+  next _ = Z
 
   {-# INLINE prev #-}
-  prev         _ = error "prev: Z"
+  prev _ = Z
 
   {-# INLINE toIndex #-}
-  toIndex      _ = 0
+  toIndex _ = 0
 
   {-# INLINE fromIndex' #-}
-  fromIndex' _ i | i > 0      = error "fromIndex: index too large"
-                 | otherwise  = Z
+  fromIndex' _ _ = Z
 
   {-# INLINE correct #-}
-  correct      _ = Z
+  correct _ = Z
 
   {-# INLINE correctOnce #-}
-  correctOnce  _ = Z
+  correctOnce _ = Z
 
   {-# INLINE lastDim #-}
-  lastDim      _ = Z
+  lastDim _ = Z
 
   {-# INLINE zipDims #-}
-  zipDims _ _ _  = Z
+  zipDims _ _ _ = Z
 
   {-# INLINE unsafeZipDims #-}
   unsafeZipDims _ _ _ = Z
@@ -256,8 +254,12 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
   toIndex   d@(x:.xs) = x + dimHead d * toIndex xs
 
   {-# INLINE fromIndex' #-}
-  fromIndex' d = \ix -> (ix `mod` h) :. fromIndex' (pdimTail d) (ix `div` h)
-    where h = pdimHead d
+  fromIndex' d ix =
+    if ix > 0
+    then (ix `rem` h) :. fromIndex' (pdimTail d) (ix `quot` h)
+    else 0 :. zero
+   where
+    h = pdimHead d
 
   {-# INLINE correct #-}
   correct d@(x:.xs)
@@ -345,7 +347,7 @@ foldlRange Roll   f = go zero
 {-# INLINE withRange #-}
 -- | Compute something from a range
 withRange :: Applicative m => Mode a -> (a -> m ()) -> m ()
-withRange m f = foldrRange m (\d acc -> acc *> f d) (pure ())
+withRange m f = foldrRange m (\d acc -> f d *> acc) (pure ())
 
 {-# INLINE foldlRangeIndices #-}
 -- | Strict left fold over the /raw/ 'Int' indices under a range
@@ -372,11 +374,11 @@ foldrRangeIndices m@Roll   cons nil = go 0
 {-# INLINE withRangeIndices #-}
 -- | Compute something using the /raw/ indices under a range
 withRangeIndices :: Applicative m => Mode n -> (Int -> m ()) -> m ()
-withRangeIndices m f = foldrRangeIndices m (\d acc -> acc *> f d) (pure ())
+withRangeIndices m f = foldrRangeIndices m (\d acc -> f d *> acc) (pure ())
 
 {-# INLINE zipMod #-}
 zipMod :: Dim n => (Int -> Int -> Int) -> n -> n -> n
-zipMod f = unsafeZipDims (\h a b -> f a b `mod` h)
+zipMod f = unsafeZipDims (\h a b -> f a b `rem` h)
 
 {-# INLINE unsafeZipDims' #-}
 unsafeZipDims':: Dim n => (Int -> Int -> Int) -> n -> n -> n
@@ -384,7 +386,7 @@ unsafeZipDims' f = unsafeZipDims (\_ a b -> f a b)
 
 {-# INLINE mapMod #-}
 mapMod :: Dim n => (Int -> Int) -> n -> n
-mapMod f = unsafeMapDim (\h a -> f a `mod` h)
+mapMod f = unsafeMapDim (\h a -> f a `rem` h)
 
 instance Num Z where
   {-# INLINE (+) #-}
@@ -535,15 +537,21 @@ instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
   mappend = (+)
 
 instance KnownNat s => Applicative ((:.) s) where
+  {-# INLINE pure #-}
+  {-# INLINE (<*>) #-}
+  {-# INLINE (*>) #-}
+  {-# INLINE (<*) #-}
   pure x                    = 1:.x
-  d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `mod` dimHead d) :. f x
+  d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `rem` dimHead d) :. f x
   (*>)                      = (>>)
   (<*)                      = flip (>>)
 
 instance KnownNat s => Monad ((:.) s) where
+  {-# INLINE return #-}
+  {-# INLINE (>>=) #-}
   return x              = 1:.x
   d@(ix0:.a) >>= f      = case f a of
-    ix1 :. b -> ((ix0*ix1) `mod` dimHead d) :. b
+    ix1 :. b -> ((ix0*ix1) `rem` dimHead d) :. b
 
 instance Ix.Ix Z where
   {-# INLINE range #-}
@@ -650,9 +658,19 @@ type family HalfQuot (x :: Peano) (y :: Peano) where
     ((x =? y) y (HalfQuot x (Succ y)))
   HalfQuot a b = b
 
--- | Produce an index half the size of the input.
--- The result of this is the number where the /half/ index occurs.
-type Median (dim :: *) = FromPeano (HalfQuot (ToPeano (Size dim)) Zero)
+type Split1 size half = '(size-half, half)
+type Split0 size      = Split1 size (FromPeano (HalfQuot (ToPeano size) Zero))
+-- | Split a dimension into two. Useful for divide-and-conquer. Odd dimensions
+-- are split with the larger half being on the left.
+type Split (dim :: *) = Split0 (Size dim)
+
+{-# INLINE splitIndices #-}
+-- | Split an index in two by halving it.
+splitIndices
+  :: forall dim l r. (Split dim ~ '(l, r), KnownNat l, KnownNat r)
+  => Proxy dim
+  -> Proxy '(l, r)
+splitIndices _ = Proxy
 
 -- | Compute the size of an index
 type family Size (dim :: *) :: Nat where
