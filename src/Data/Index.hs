@@ -56,6 +56,8 @@ module Data.Index
     -- * Algorithms
   , DivideAndConquer
   , divideAndConquer
+  , DMode(..)
+  , dunroll, droll
     -- * Range types
   , Ranged
   , InRange
@@ -93,7 +95,7 @@ import           GHC.Generics
 import           GHC.TypeLits
 import           Language.Haskell.TH       hiding (Range (..))
 import           Language.Haskell.TH.Quote
-import Debug.Trace
+-- import Debug.Trace
 
 -- | Index constructor, analogous to ':'
 --
@@ -705,21 +707,21 @@ type family Tips (halves :: Halves' Nat) :: Halves' Nat where
 
 type Divide (dim :: *) = Splits' dim Zero
 
-data DnC (h :: Maybe (Halves' Nat)) dim where
-  DRoll   :: Dim dim => DnC Nothing dim
-  DUnroll :: (Divide dim ~ h, DivideAndConquer h) => DnC (Just h) dim
+data DMode (h :: Maybe (Halves' Nat)) dim where
+  DRoll   :: Dim dim => DMode Nothing dim
+  DUnroll :: (Divide dim ~ h, DivideAndConquer h) => DMode (Just h) dim
 
-droll :: Dim dim => proxy dim -> DnC Nothing dim
+droll :: Dim dim => proxy dim -> DMode Nothing dim
 droll _ = DRoll
           
-dunroll :: (Divide dim ~ h, DivideAndConquer h) => proxy dim -> DnC (Just h) dim
+dunroll :: (Divide dim ~ h, DivideAndConquer h) => proxy dim -> DMode (Just h) dim
 dunroll _ = DUnroll
 
 type family UnJust m where
   UnJust (Just a) = a
 
 divideAndConquer
-  :: forall dim h t. DnC h dim
+  :: forall dim h t. DMode h dim
   -> (Int -> Int -> t)
   -> (Int -> t -> Int -> t -> Int -> t)
   -> t
