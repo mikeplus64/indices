@@ -53,6 +53,9 @@ module Data.Index
   , foldlRangeIndices
   , foldrRangeIndices
   , withRangeIndices
+    -- * Algorithms
+  , DivideAndConquer
+  , divideAndConquer
     -- * Range types
   , Ranged
   , InRange
@@ -63,12 +66,16 @@ module Data.Index
   , ToPeano
   , FromPeano
     -- * Utility
-  , splitIndices
   , showBound
   , bounds
   , range
   , pdimHead, pdimTail
   , cnat
+    -- ** Type families
+  , Divide
+  , Halves'(..)
+  , Halves
+  , HalfQuot, HalfRem
     -- * Syntax
   , dim, dimu, dimr
   , module Data.Proxy
@@ -86,6 +93,7 @@ import           GHC.Generics
 import           GHC.TypeLits
 import           Language.Haskell.TH       hiding (Range (..))
 import           Language.Haskell.TH.Quote
+import Debug.Trace
 
 -- | Index constructor, analogous to ':'
 --
@@ -658,19 +666,138 @@ type family HalfQuot (x :: Peano) (y :: Peano) where
     ((x =? y) y (HalfQuot x (Succ y)))
   HalfQuot a b = b
 
-type Split1 size half = '(size-half, half)
-type Split0 size      = Split1 size (FromPeano (HalfQuot (ToPeano size) Zero))
+data Halves' a
+  = -- | [lower, upper)
+    Slice !a -- ^ lower
+          !a -- ^ middle
+          !a -- ^ upper
+  | Tip !a !a
+  | Slices !a (Halves' a) !a (Halves' a) !a
+ deriving (Show, Eq, Ord)
+
+type Halves = Halves' Int
+
+type Split2 size half = Slice 0 half size
+type Split1 size      = Split2 size (FromPeano (HalfQuot (ToPeano size) Zero))
+
+type family Add l k where
+  Add l (Slice x y z) = Slice (l+x) (l+y) (l+z)
+
 -- | Split a dimension into two. Useful for divide-and-conquer. Odd dimensions
 -- are split with the larger half being on the left.
-type Split (dim :: *) = Split0 (Size dim)
+type family Split0 (dim :: k) :: Halves' Nat where
+  Split0 (dim :: *)    = Split1 (Size dim)
+  Split0 (Slice l m u) =
+    Slices l (Add l (Split1 (m-l))) m (Add m (Split1 (u-m))) u
 
+  Split0 (Slices l hl m hu u) =
+    Slices l (Split0 hl) m (Split0 hu) u
+
+type Splits'0 h = Splits' h (SliceDiff h)
+
+type family Splits' (dim :: k) (diff :: Peano) :: Halves' Nat where
+  Splits' (h :: Halves' Nat) (Succ Zero) = Tips h
+  Splits' (h :: k)           diff        = Splits'0 (Split0 h)
+
+type family Tips (halves :: Halves' Nat) :: Halves' Nat where
+  Tips (Slice  a b c)       = ((c-a) =? 2) (Tip a c) (Slice a b c)
+  Tips (Slices l hl m hu u) = Slices l (Tips hl) m (Tips hu) u
+
+type Divide (dim :: *) = Splits' dim Zero
+
+data DnC (h :: Maybe (Halves' Nat)) dim where
+  DRoll   :: Dim dim => DnC Nothing dim
+  DUnroll :: (Divide dim ~ h, DivideAndConquer h) => DnC (Just h) dim
+
+droll :: Dim dim => proxy dim -> DnC Nothing dim
+droll _ = DRoll
+          
+dunroll :: (Divide dim ~ h, DivideAndConquer h) => proxy dim -> DnC (Just h) dim
+dunroll _ = DUnroll
+
+type family UnJust m where
+  UnJust (Just a) = a
+
+divideAndConquer
+  :: forall dim h t. DnC h dim
+  -> (Int -> Int -> t)
+  -> (Int -> t -> Int -> t -> Int -> t)
+  -> t
+divideAndConquer   DUnroll f conq = divide' (Proxy :: Proxy (UnJust h)) f conq
+divideAndConquer r@DRoll   f conq = split {- 0 -} s0 0 s0
+ where
+  s0 = size r
+  split -- n
+        s -- ^ size of this partition
+        l -- ^ this partition's start index
+        u -- ^ this partition's end index (non-inclusive)
+ -- | trace (replicate (2*n) ' ' ++ show s ++ show (l,u)) False = error "what"
+    | s <= 3    = f l u
+    | otherwise =
+        let (s', r') = s `quotRem` 2
+            m        = l + s'
+        in conq
+           l (split {- (n+1) -} s'     l (l+s'))
+           m (split {- (n+1) -} (s-s') m (m+s'+r'))
+           u
+  
+type family SliceDiff (s :: Halves' Nat) :: Peano where
+  SliceDiff (Slice  a b c)       = ToPeano (b - a)
+  SliceDiff (Slices l hl m hr r) = SliceDiff hl
+
+class DivideAndConquer (h :: Halves' Nat) where
+  divide'
+    :: Proxy h
+    -> (Int -> Int -> t) -- ^ divide
+    -> (Int -> t ->
+        Int -> t ->
+        Int -> t) -- ^ conquer
+    -> t
+          
+instance forall l hl m hu u.
+    ( KnownNat l, KnownNat m, KnownNat u
+    , DivideAndConquer hl, DivideAndConquer hu)
+    => DivideAndConquer (Slices l hl m hu u) where
+  {-# INLINE divide' #-}
+  divide' _ f combine =
+    combine
+      (cnat    (Proxy :: Proxy l))
+      (divide' (Proxy :: Proxy hl) f combine)
+      (cnat    (Proxy :: Proxy m))
+      (divide' (Proxy :: Proxy hu) f combine)
+      (cnat    (Proxy :: Proxy u))
+
+instance forall a b. (KnownNat a, KnownNat b)
+         => DivideAndConquer (Tip a b) where
+  {-# INLINE divide' #-}
+  divide' _ f _conquer =
+    f (cnat (Proxy :: Proxy a)) (cnat (Proxy :: Proxy b))
+
+instance forall l m u. (KnownNat l, KnownNat m, KnownNat u)
+         => DivideAndConquer (Slice l m u) where
+  divide' _ f _combine = f
+    (cnat (Proxy :: Proxy l))
+    (cnat (Proxy :: Proxy u))
+
+    -- Slices (Add l (Split0 (m-l))) (Add m (Split0 (u-m)))
+
+{-
 {-# INLINE splitIndices #-}
 -- | Split an index in two by halving it.
 splitIndices
   :: forall dim l r. (Split dim ~ '(l, r), KnownNat l, KnownNat r)
   => Proxy dim
+  -> (Int, Int)
+splitIndices _ = (cnat (Proxy :: Proxy l), cnat (Proxy :: Proxy r))
+
+{-# INLINE split #-}
+-- | Split an index in two by halving it.
+split
+  :: forall dim l r. (Split dim ~ '(l, r), KnownNat l, KnownNat r)
+  => Proxy dim
   -> Proxy '(l, r)
-splitIndices _ = Proxy
+split _ = Proxy
+-}
 
 -- | Compute the size of an index
 type family Size (dim :: *) :: Nat where
