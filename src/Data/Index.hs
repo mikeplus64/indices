@@ -54,10 +54,9 @@ module Data.Index
   , foldrRangeIndices
   , withRangeIndices
     -- * Algorithms
-  , DivideAndConquer
   , divideAndConquer
-  , DMode(..)
-  , dunroll, droll
+  , DivideAndConquer
+  , DMode(..), dunroll, droll
     -- * Range types
   , Ranged
   , InRange
@@ -74,10 +73,9 @@ module Data.Index
   , pdimHead, pdimTail
   , cnat
     -- ** Type families
-  , Divide
-  , Halves'(..)
-  , Halves
   , Half
+  , Divide
+  , Halves(..)
     -- * Syntax
   , dim, dimu, dimr
   , module Data.Proxy
@@ -95,7 +93,6 @@ import           GHC.Generics
 import           GHC.TypeLits
 import           Language.Haskell.TH       hiding (Range (..))
 import           Language.Haskell.TH.Quote
--- import Debug.Trace
 
 -- | Index constructor, analogous to ':'
 --
@@ -644,17 +641,18 @@ instance (Dim n, Range (ToPeano (Size n))) => Ranged n
 data Peano = Zero | Succ Peano
 
 -- | Convert a 'Nat' to a type-level 'Peano'
-type family ToPeano (n :: Nat) :: Peano where
-  ToPeano 0 = Zero
-  ToPeano n = Succ (ToPeano (n-1))
+type family ToPeano' (n :: Nat) (acc :: Peano) :: Peano where
+  ToPeano' 0 acc = acc
+  ToPeano' n acc = ToPeano' (n - 1) (Succ acc)
+
+type ToPeano (n :: Nat) = ToPeano' n Zero
 
 type family FromPeano (n :: Peano) :: Nat where
   FromPeano (Succ n) = 1 + FromPeano n
   FromPeano Zero = 0
 
-type family (=?) a b then_ else_ where
-  (a =? a) then_ else_ = then_
-  (a =? b) then_ else_ = else_
+--------------------------------------------------------------------------------
+-- Divide and conquer
 
 type family Half' (phx :: Nat) (hx :: Nat) (tx :: Nat) (x :: Nat) where
   Half' hx' hx 0 x = hx' - 2 -- even
@@ -666,130 +664,167 @@ type family Half (x :: Nat) where
   Half 1 = 0
   Half n = Half' 0 0 2 n
 
-data Halves' a
+data Halves
   = -- | [lower, upper)
-    Slice !a -- ^ lower
-          !a -- ^ middle
-          !a -- ^ upper
-  | Tip2 !a !a
-  | Tip1 !a
-  | Slices !a (Halves' a) !a (Halves' a) !a
- deriving (Show, Eq, Ord)
+    Split Nat -- ^ lower
+          Nat -- ^ middle
+          Nat -- ^ upper
 
-type Halves = Halves' Int
+  | Slices Nat Halves Nat Halves Nat
+  | One   Nat
+  | Two   Nat Nat
+  | Three Nat Nat Nat
+  | None
 
 type family Add l k where
-  Add l (Slice x y z) = Slice (l+x) (l+y) (l+z)
+  Add l (Split x y z) = Split (l+x) (l+y) (l+z)
+
+type family SplitWithDiff (ml :: Nat) (ul :: Nat) (dim :: Halves) :: k where
+  SplitWithDiff 1  2  (Split l m u) = Two l m
+  SplitWithDiff 1  3  (Split l m u) = Three l m (u-1)
+  SplitWithDiff ml ul (Split l m u) = SplitAll
+    (Slices
+     l (Add l (Split1 (m-l)))
+     m (Add m (Split1 (u-m)))
+     u)
 
 -- | Split a dimension into two. Useful for divide-and-conquer. Odd dimensions
 -- are split with the larger half being on the left.
-type family SplitOnce (dim :: k) :: Halves' Nat where
-  SplitOnce (dim :: *)    = Split1 (Size dim)
-  SplitOnce (Slice l m u) =
-    Slices
-      l (Add l (Split1 (m-l)))
-      m (Add m (Split1 (u-m)))
-      u
+type family SplitAll (dim :: Halves) :: Halves where
+  SplitAll (Split l m u)        = SplitWithDiff (m-l) (u-l) (Split l m u)
+  SplitAll (Slices l hl m hu u) = Slices l (SplitAll hl) m (SplitAll hu) u
 
-  SplitOnce (Slices l hl m hu u) =
-    Slices l (SplitOnce hl) m (SplitOnce hu) u
+type family SplitsIfSizeGt1 (dim :: *) (s :: Nat) :: Halves where
+  SplitsIfSizeGt1 Z       s = None
+  SplitsIfSizeGt1 dim     1 = One 0
+  SplitsIfSizeGt1 (x:.xs) s = SplitAll (Split1 s)
+
+type Divide (dim :: *) = SplitsIfSizeGt1 dim (Size dim)
 
 -- where...
 type Split1 size      = Split2 size (Half size)
-type Split2 size half = Slice 0 half size
+type Split2 size half = Split 0 half size
 
+data Slice a = Slice
+  { start :: !Int
+  , thing :: !a
+  , bound :: !Int
+  } deriving (Show, Eq, Ord)
 
-type Splits'0 h = Splits' h (SliceDiff h)
-
-type family Splits' (dim :: k) (diff :: Peano) :: Halves' Nat where
-  Splits' (h :: Halves' Nat) (Succ Zero) = Tips h
-  Splits' (h :: k)           diff        = Splits'0 (SplitOnce h)
-
-type family Tips (halves :: Halves' Nat) :: Halves' Nat where
-  Tips (Slice  a b c)       = ((c-a) =? 2) (Tip2 a c) (Slice a b c)
-  Tips (Slices l hl m hu u) = Slices l (Tips hl) m (Tips hu) u
-
-type Divide (dim :: *) = Splits' dim Zero
-
-data DMode (h :: Maybe (Halves' Nat)) dim where
-  DRoll   :: Dim dim => DMode Nothing dim
-  DUnroll :: (Divide dim ~ h, DivideAndConquer h) => DMode (Just h) dim
-
-droll :: Dim dim => proxy dim -> DMode Nothing dim
-droll _ = DRoll
-          
-dunroll :: (Divide dim ~ h, DivideAndConquer h) => proxy dim -> DMode (Just h) dim
-dunroll _ = DUnroll
-
-type family UnJust m where
-  UnJust (Just a) = a
-
-divideAndConquer
-  :: forall dim h t. DMode h dim
-  -> (Int -> t)
-  -> (Int -> Int -> t)
-  -> (Int -> t -> Int -> t -> Int -> t)
-  -> t
-divideAndConquer   DUnroll f1 f2 conq = divide' (Proxy :: Proxy (UnJust h)) f2 conq
-divideAndConquer r@DRoll   f1 f2 conq = split {- 0 -} s0 0 s0
- where
-  s0 = size r
-  split -- n
-        s -- ^ size of this partition
-        l -- ^ this partition's start index
-        u -- ^ this partition's end index (non-inclusive)
- -- | trace (replicate (2*n) ' ' ++ show s ++ show (l,u)) False = error "what"
-    | s <= 2    =
-        if s == 1
-        then f1 l
-        else f2 l (u-1)
-    | otherwise =
-        let (s', r') = s `quotRem` 2
-            m        = l + s'
-        in conq
-           l (split {- (n+1) -} s'     l (l+s'))
-           m (split {- (n+1) -} (s-s') m (m+s'+r'))
-           u
-  
-type family SliceDiff (s :: Halves' Nat) :: Peano where
-  SliceDiff (Slice  a b c)       = ToPeano (b - a)
-  SliceDiff (Slices l hl m hr r) = SliceDiff hl
-
-class DivideAndConquer (h :: Halves' Nat) where
-  divide'
-    :: Proxy h
-    -> (Int -> Int -> t) -- ^ divide
-    -> (Int -> t ->
-        Int -> t ->
-        Int -> t) -- ^ conquer
-    -> t
+class DivideAndConquer (h :: Halves) where
+  dnc
+    :: Monad f
+    => proxy h
+    -> (Int -> f t)                -- ^ first step
+    -> (Slice t -> Slice t -> f t) -- ^ merge
+    -> f t
           
 instance forall l hl m hu u.
     ( KnownNat l, KnownNat m, KnownNat u
     , DivideAndConquer hl, DivideAndConquer hu)
     => DivideAndConquer (Slices l hl m hu u) where
-  {-# INLINE divide' #-}
-  divide' _ f combine =
-    combine
-      (cnat    (Proxy :: Proxy l))
-      (divide' (Proxy :: Proxy hl) f combine)
-      (cnat    (Proxy :: Proxy m))
-      (divide' (Proxy :: Proxy hu) f combine)
-      (cnat    (Proxy :: Proxy u))
+  {-# INLINE dnc #-}
+  dnc _ f merge = do
+    l <- dnc (Proxy :: Proxy hl) f merge
+    r <- dnc (Proxy :: Proxy hu) f merge
+    merge
+      Slice{ start = cnat (Proxy :: Proxy l)
+           , thing = l
+           , bound = cnat (Proxy :: Proxy m)
+           }
+      Slice{ start = cnat (Proxy :: Proxy m)
+           , thing = r
+           , bound = cnat (Proxy :: Proxy u)
+           }
 
-instance forall a b. (KnownNat a, KnownNat b)
-         => DivideAndConquer (Tip2 a b) where
-  {-# INLINE divide' #-}
-  divide' _ f _conquer =
-    f (cnat (Proxy :: Proxy a)) (cnat (Proxy :: Proxy b))
+instance forall a. KnownNat a => DivideAndConquer (One a) where
+  {-# INLINE dnc #-}
+  dnc _ f _merge = f (cnat (Proxy :: Proxy a))
 
-instance forall l m u. (KnownNat l, KnownNat m, KnownNat u)
-         => DivideAndConquer (Slice l m u) where
-  divide' _ f _combine = f
-    (cnat (Proxy :: Proxy l))
-    (cnat (Proxy :: Proxy u))
+instance forall a b.
+    (KnownNat a, KnownNat b
+    ) => DivideAndConquer (Two a b) where
+  {-# INLINE dnc #-}
+  dnc _ f merge = do
+    let a' = cnat (Proxy :: Proxy a)
+        b' = cnat (Proxy :: Proxy b)
+    fa <- f a'
+    fb <- f b'
+    merge
+      Slice{ start = a'
+           , thing = fa
+           , bound = b'
+           }
+      Slice{ start = b'
+           , thing = fb
+           , bound = b'+1
+           }
 
-    -- Slices (Add l (Split0 (m-l))) (Add m (Split0 (u-m)))
+instance forall a b c.
+    (KnownNat a, KnownNat b, KnownNat c
+    ) => DivideAndConquer (Three a b c) where
+  {-# INLINE dnc #-}
+  dnc _ f merge = do
+    let a' = cnat (Proxy :: Proxy a)
+        b' = cnat (Proxy :: Proxy b)
+        c' = cnat (Proxy :: Proxy c)
+    fa <- f a'
+    fb <- f b'
+    fc <- f c'
+    r <- merge
+      Slice{ start = b'
+           , thing = fb
+           , bound = c'
+           }
+      Slice{ start = c'
+           , thing = fc
+           , bound = c' + 1
+           }
+    merge
+      Slice{ start = a'
+           , thing = fa
+           , bound = b'
+           }
+      Slice{ start = b'
+           , thing = r
+           , bound = c' + 1
+           }
+
+data DMode (dim :: *) where
+  DRoll   :: Dim dim => DMode dim
+  DUnroll :: DivideAndConquer (Divide dim) => DMode dim
+
+droll :: Dim dim => proxy dim -> DMode dim
+droll _ = DRoll
+          
+dunroll :: (Divide dim ~ h, DivideAndConquer h) => proxy dim -> DMode dim
+dunroll _ = DUnroll
+
+divideAndConquer
+  :: forall f dim t. Monad f
+  => DMode dim
+  -> (Int -> f t)
+  -> (Slice t -> Slice t -> f t)
+  -> f t
+divideAndConquer   DUnroll f merge = dnc (Proxy :: Proxy (Divide dim)) f merge
+divideAndConquer m@DRoll   f merge = go s0 0 s0
+ where
+  s0 :: Int
+  s0 = size m
+
+  go :: Int -- ^ size of current slice
+     -> Int -- ^ this slice's start index
+     -> Int -- ^ this slice's upper bound
+     -> f t
+  go n i0 iN
+    | n == 1    = f i0
+    | otherwise = do
+        let (n2, _r) = n `quotRem` 2
+            iM  = i0 + n2
+        left  <- go n2     i0 iM
+        right <- go (n-n2) iM iN
+        merge Slice{ start = i0, thing = left  , bound = iM }
+              Slice{ start = iM, thing = right , bound = iN }
 
 {-
 {-# INLINE splitIndices #-}
