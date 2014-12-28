@@ -77,7 +77,7 @@ module Data.Index
   , Divide
   , Halves'(..)
   , Halves
-  , HalfQuot, HalfRem
+  , Half
     -- * Syntax
   , dim, dimu, dimr
   , module Data.Proxy
@@ -656,31 +656,30 @@ type family (=?) a b then_ else_ where
   (a =? a) then_ else_ = then_
   (a =? b) then_ else_ = else_
 
-type family HalfRem (x :: Peano) :: Nat where
-  HalfRem (Succ (Succ a)) = HalfRem a
-  HalfRem (Succ Zero)     = 1
-  HalfRem Zero            = 0
+type family Half' (phx :: Nat) (hx :: Nat) (tx :: Nat) (x :: Nat) where
+  Half' hx' hx 0 x = hx' - 2
+  Half' hx' hx 1 x = hx' - 2
+  Half' phx hx t x = Half' (phx+1) (phx*2) (x - hx) x
 
-type family HalfQuot (x :: Peano) (y :: Peano) where
-  HalfQuot (Succ x) y =
-    (Succ x =? y)
-    (Succ x)
-    ((x =? y) y (HalfQuot x (Succ y)))
-  HalfQuot a b = b
+type family Half (x :: Nat) where
+  Half 0 = 0
+  Half 1 = 0
+  Half n = Half' 0 1 2 n
 
 data Halves' a
   = -- | [lower, upper)
     Slice !a -- ^ lower
           !a -- ^ middle
           !a -- ^ upper
-  | Tip !a !a
+  | Tip2 !a !a
+  | Tip1 !a
   | Slices !a (Halves' a) !a (Halves' a) !a
  deriving (Show, Eq, Ord)
 
 type Halves = Halves' Int
 
 type Split2 size half = Slice 0 half size
-type Split1 size      = Split2 size (FromPeano (HalfQuot (ToPeano size) Zero))
+type Split1 size      = Split2 size (Half size)
 
 type family Add l k where
   Add l (Slice x y z) = Slice (l+x) (l+y) (l+z)
@@ -702,7 +701,7 @@ type family Splits' (dim :: k) (diff :: Peano) :: Halves' Nat where
   Splits' (h :: k)           diff        = Splits'0 (Split0 h)
 
 type family Tips (halves :: Halves' Nat) :: Halves' Nat where
-  Tips (Slice  a b c)       = ((c-a) =? 2) (Tip a c) (Slice a b c)
+  Tips (Slice  a b c)       = ((c-a) =? 2) (Tip2 a c) (Slice a b c)
   Tips (Slices l hl m hu u) = Slices l (Tips hl) m (Tips hu) u
 
 type Divide (dim :: *) = Splits' dim Zero
@@ -722,11 +721,12 @@ type family UnJust m where
 
 divideAndConquer
   :: forall dim h t. DMode h dim
+  -> (Int -> t)
   -> (Int -> Int -> t)
   -> (Int -> t -> Int -> t -> Int -> t)
   -> t
-divideAndConquer   DUnroll f conq = divide' (Proxy :: Proxy (UnJust h)) f conq
-divideAndConquer r@DRoll   f conq = split {- 0 -} s0 0 s0
+divideAndConquer   DUnroll f1 f2 conq = divide' (Proxy :: Proxy (UnJust h)) f2 conq
+divideAndConquer r@DRoll   f1 f2 conq = split {- 0 -} s0 0 s0
  where
   s0 = size r
   split -- n
@@ -734,7 +734,10 @@ divideAndConquer r@DRoll   f conq = split {- 0 -} s0 0 s0
         l -- ^ this partition's start index
         u -- ^ this partition's end index (non-inclusive)
  -- | trace (replicate (2*n) ' ' ++ show s ++ show (l,u)) False = error "what"
-    | s <= 3    = f l u
+    | s <= 2    =
+        if s == 1
+        then f1 l
+        else f2 l (u-1)
     | otherwise =
         let (s', r') = s `quotRem` 2
             m        = l + s'
@@ -770,7 +773,7 @@ instance forall l hl m hu u.
       (cnat    (Proxy :: Proxy u))
 
 instance forall a b. (KnownNat a, KnownNat b)
-         => DivideAndConquer (Tip a b) where
+         => DivideAndConquer (Tip2 a b) where
   {-# INLINE divide' #-}
   divide' _ f _conquer =
     f (cnat (Proxy :: Proxy a)) (cnat (Proxy :: Proxy b))
