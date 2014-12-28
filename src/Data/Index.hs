@@ -55,6 +55,7 @@ module Data.Index
   , withRangeIndices
     -- * Algorithms
   , divideAndConquer
+  , Slice(..)
   , DivideAndConquer
   , DMode(..), dunroll, droll
     -- * Range types
@@ -800,6 +801,7 @@ droll _ = DRoll
 dunroll :: (Divide dim ~ h, DivideAndConquer h) => proxy dim -> DMode dim
 dunroll _ = DUnroll
 
+{-# INLINE divideAndConquer #-}
 divideAndConquer
   :: forall f dim t. Monad f
   => DMode dim
@@ -825,24 +827,6 @@ divideAndConquer m@DRoll   f merge = go s0 0 s0
         right <- go (n-n2) iM iN
         merge Slice{ start = i0, thing = left  , bound = iM }
               Slice{ start = iM, thing = right , bound = iN }
-
-{-
-{-# INLINE splitIndices #-}
--- | Split an index in two by halving it.
-splitIndices
-  :: forall dim l r. (Split dim ~ '(l, r), KnownNat l, KnownNat r)
-  => Proxy dim
-  -> (Int, Int)
-splitIndices _ = (cnat (Proxy :: Proxy l), cnat (Proxy :: Proxy r))
-
-{-# INLINE split #-}
--- | Split an index in two by halving it.
-split
-  :: forall dim l r. (Split dim ~ '(l, r), KnownNat l, KnownNat r)
-  => Proxy dim
-  -> Proxy '(l, r)
-split _ = Proxy
--}
 
 -- | Compute the size of an index
 type family Size (dim :: *) :: Nat where
