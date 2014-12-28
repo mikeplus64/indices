@@ -657,14 +657,14 @@ type family (=?) a b then_ else_ where
   (a =? b) then_ else_ = else_
 
 type family Half' (phx :: Nat) (hx :: Nat) (tx :: Nat) (x :: Nat) where
-  Half' hx' hx 0 x = hx' - 2
-  Half' hx' hx 1 x = hx' - 2
+  Half' hx' hx 0 x = hx' - 2 -- even
+  Half' hx' hx 1 x = hx' - 2 -- odd
   Half' phx hx t x = Half' (phx+1) (phx*2) (x - hx) x
 
 type family Half (x :: Nat) where
   Half 0 = 0
   Half 1 = 0
-  Half n = Half' 0 1 2 n
+  Half n = Half' 0 0 2 n
 
 data Halves' a
   = -- | [lower, upper)
@@ -678,27 +678,32 @@ data Halves' a
 
 type Halves = Halves' Int
 
-type Split2 size half = Slice 0 half size
-type Split1 size      = Split2 size (Half size)
-
 type family Add l k where
   Add l (Slice x y z) = Slice (l+x) (l+y) (l+z)
 
 -- | Split a dimension into two. Useful for divide-and-conquer. Odd dimensions
 -- are split with the larger half being on the left.
-type family Split0 (dim :: k) :: Halves' Nat where
-  Split0 (dim :: *)    = Split1 (Size dim)
-  Split0 (Slice l m u) =
-    Slices l (Add l (Split1 (m-l))) m (Add m (Split1 (u-m))) u
+type family SplitOnce (dim :: k) :: Halves' Nat where
+  SplitOnce (dim :: *)    = Split1 (Size dim)
+  SplitOnce (Slice l m u) =
+    Slices
+      l (Add l (Split1 (m-l)))
+      m (Add m (Split1 (u-m)))
+      u
 
-  Split0 (Slices l hl m hu u) =
-    Slices l (Split0 hl) m (Split0 hu) u
+  SplitOnce (Slices l hl m hu u) =
+    Slices l (SplitOnce hl) m (SplitOnce hu) u
+
+-- where...
+type Split1 size      = Split2 size (Half size)
+type Split2 size half = Slice 0 half size
+
 
 type Splits'0 h = Splits' h (SliceDiff h)
 
 type family Splits' (dim :: k) (diff :: Peano) :: Halves' Nat where
   Splits' (h :: Halves' Nat) (Succ Zero) = Tips h
-  Splits' (h :: k)           diff        = Splits'0 (Split0 h)
+  Splits' (h :: k)           diff        = Splits'0 (SplitOnce h)
 
 type family Tips (halves :: Halves' Nat) :: Halves' Nat where
   Tips (Slice  a b c)       = ((c-a) =? 2) (Tip2 a c) (Slice a b c)
