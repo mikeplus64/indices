@@ -342,7 +342,7 @@ foldrRange Roll   cons nil = go zero
     | otherwise = cons top nil
 
 {-# INLINE foldlRange #-}
--- | Lazy right fold over a range.
+-- | Strict left fold over a range.
 foldlRange :: Mode n -> (b -> n -> b) -> b -> b
 foldlRange Unroll f = sfoldlRange_ (tagPeano zero) f
 foldlRange Roll   f = go zero
