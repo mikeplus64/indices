@@ -377,25 +377,46 @@ nextN n dim
 {-# INLINE foldrRange #-}
 -- | Lazy right fold over a range.
 foldrRange :: Mode n -> (n -> b -> b) -> b -> b
-foldrRange Unroll cons nil = sfoldrRange_ (tagPeano zero) cons nil
-foldrRange Roll   cons nil = go zero
- where
-  top = lastDim Proxy -- hopefully make sure this isn't recomputed
-  {-# INLINE go #-}
-  go !i
-    | i < top   = i `cons` go (next i)
-    | otherwise = cons top nil
+foldrRange m cons nil = case m of
+  Unroll          -> sfoldrRange_ (tagPeano zero) cons nil
+  UnrollBy step q -> sfoldrRangeBy_ (tagStep q) (toPeano step) cons nil
+  Roll -> go zero
+   where
+    top = lastDim Proxy -- hopefully make sure this isn't recomputed
+    {-# INLINE go #-}
+    go !i
+      | i < top   = i `cons` go (next i)
+      | otherwise = cons top nil
+  RollBy step
+    | size m `rem` step == 0 -> go zero
+    | otherwise              -> error "foldrRange: step doesn't divide range."
+   where
+    top = lastDim Proxy -- hopefully make sure this isn't recomputed
+    {-# INLINE go #-}
+    go !i
+      | i < top   = i `cons` go (nextN step i)
+      | otherwise = cons top nil
 
 {-# INLINE foldlRange #-}
 -- | Strict left fold over a range.
 foldlRange :: Mode n -> (b -> n -> b) -> b -> b
-foldlRange Unroll f = sfoldlRange_ (tagPeano zero) f
-foldlRange Roll   f = go zero
- where
-  top = lastDim Proxy -- hopefully make sure this isn't recomputed
-  go !i !acc
-    | i < top   = go (next i) (f acc i)
-    | otherwise = f acc i
+foldlRange m cons nil = case m of
+  Unroll          -> sfoldlRange_ (tagPeano zero) cons nil
+  UnrollBy step q -> sfoldlRangeBy_ (tagStep q) (toPeano step) cons nil
+  Roll -> go zero nil
+   where
+    top = lastDim Proxy -- hopefully make sure this isn't recomputed
+    go !i !acc
+      | i < top   = go (next i) (cons acc i)
+      | otherwise = cons acc i
+  RollBy step
+    | size m `rem` step == 0 -> go zero nil
+    | otherwise              -> error "foldrRange: step doesn't divide range."
+   where
+    top = lastDim Proxy
+    go !i !acc
+      | i < top   = go (nextN step i) (cons acc i)
+      | otherwise = cons acc i
 
 {-# INLINE withRange #-}
 -- | Compute something from a range
@@ -405,23 +426,48 @@ withRange m f = foldrRange m (\d acc -> f d *> acc) (pure ())
 {-# INLINE foldlRangeIndices #-}
 -- | Strict left fold over the /raw/ 'Int' indices under a range
 foldlRangeIndices :: Mode n -> (b -> Int -> b) -> b -> b
-foldlRangeIndices m@Unroll cons = sfoldlRangeIndices_ (tagPeanoI m) cons
-foldlRangeIndices m@Roll   cons = go 0
-  where
+foldlRangeIndices m cons nil = case m of
+  Unroll          -> sfoldlRangeIndices_ (tagPeanoI m) cons nil
+  UnrollBy step q -> sfoldlRangeIndicesBy_ (tagInt q) (cnat step) cons nil
+
+  Roll -> go 0 nil
+   where
     s = size m
     go !i !acc
       | i < s     = go (i+1) (cons acc i)
       | otherwise = acc
 
+  RollBy step
+    | s `rem` step == 0 -> go 0 nil
+    | otherwise         -> error "foldlRangeIndices: step does not divide range"
+   where
+    s = size m
+    go !i !acc
+      | i < s     = go (i+step) (cons acc i)
+      | otherwise = acc
+
 {-# INLINE foldrRangeIndices #-}
 -- | Lazy right fold over the /raw/ 'Int' indices under a range
 foldrRangeIndices :: Mode n -> (Int -> b -> b) -> b -> b
-foldrRangeIndices m@Unroll cons nil = sfoldrRangeIndices_ (tagPeanoI m) cons nil
-foldrRangeIndices m@Roll   cons nil = go 0
-  where
+foldrRangeIndices m cons nil = case m of
+  Unroll          -> sfoldrRangeIndices_ (tagPeanoI m) cons nil
+
+  UnrollBy step q -> sfoldrRangeIndicesBy_ (tagInt q) (cnat step) cons nil
+
+  Roll -> go 0 
+   where
     s = size m
     go !i
-      | i < s     = i `cons` go (i+1)
+      | i < s     = i `cons` go (i+1) 
+      | otherwise = nil
+
+  RollBy step
+    | s `rem` step == 0 -> go 0
+    | otherwise         -> error "foldrRangeIndices: step does not divide range"
+   where
+    s = size m
+    go !i
+      | i < s     = i `cons` go (i+step)
       | otherwise = nil
 
 {-# INLINE withRangeIndices #-}
@@ -673,52 +719,120 @@ type family InRange (a :: *) (b :: *) :: Bool where
   InRange (x:.xs) (y:.ys) = x <=? y && InRange xs ys
 
 class Range (n :: Peano) where
+  stepBy :: Dim dim => Proxy n -> dim -> dim
+  
   sfoldrRange_ :: Dim o => Tagged n o -> (o -> b -> b) -> b -> b
   sfoldlRange_ :: Dim o => Tagged n o -> (b -> o -> b) -> b -> b
+
+  sfoldrRangeBy_
+    :: (Dim o, Range step) => Tagged n o -> Proxy step -> (o -> b -> b) -> b -> b
+
+  sfoldlRangeBy_
+    :: (Dim o, Range step) => Tagged n o -> Proxy step -> (b -> o -> b) -> b -> b
 
   sfoldrRangeIndices_ :: Tagged n Int -> (Int -> b -> b) -> b -> b
   sfoldlRangeIndices_ :: Tagged n Int -> (b -> Int -> b) -> b -> b
 
+  sfoldrRangeIndicesBy_ :: Tagged n Int -> Int -> (Int -> b -> b) -> b -> b
+  sfoldlRangeIndicesBy_ :: Tagged n Int -> Int -> (b -> Int -> b) -> b -> b
+
 instance Range Zero where
+  {-# INLINE stepBy #-}
+  stepBy _ a = a
+  
   {-# INLINE sfoldrRange_ #-}
   {-# INLINE sfoldlRange_ #-}
-  sfoldrRange_ _ _ z = z
-  sfoldlRange_ _ _ z = z
+  sfoldrRange_ _ _  z = z
+  sfoldlRange_ _ _ !z = z
+
+  {-# INLINE sfoldrRangeBy_ #-}
+  {-# INLINE sfoldlRangeBy_ #-}
+  sfoldrRangeBy_ _ _ _  z = z
+  sfoldlRangeBy_ _ _ _ !z = z
 
   {-# INLINE sfoldrRangeIndices_ #-}
   {-# INLINE sfoldlRangeIndices_ #-}
   sfoldrRangeIndices_ _ _  z = z
   sfoldlRangeIndices_ _ _ !z = z
 
+  {-# INLINE sfoldrRangeIndicesBy_ #-}
+  {-# INLINE sfoldlRangeIndicesBy_ #-}
+  sfoldrRangeIndicesBy_ _ _ _  z = z
+  sfoldlRangeIndicesBy_ _ _ _ !z = z
+
 instance Range n => Range (Succ n) where
+  {-# INLINE stepBy #-}
+  stepBy i a = stepBy (nextProxy i) (next a)
+
   {-# INLINE sfoldrRange_ #-}
   {-# INLINE sfoldlRange_ #-}
-  sfoldrRange_ i f z = f (unTagged i) (sfoldrRange_ (nextTagged i) f z)
+  sfoldrRange_ i  f  z = unTagged i `f` sfoldrRange_ (nextTagged i) f z
   sfoldlRange_ !i f !z = sfoldlRange_ (nextTagged i) f (f z (unTagged i))
+  
+  {-# INLINE sfoldrRangeBy_ #-}
+  {-# INLINE sfoldlRangeBy_ #-}
+  sfoldrRangeBy_  i st f  z =
+    unTagged i `f` sfoldrRangeBy_ (stepTagged st i) st f z
+  
+  sfoldlRangeBy_ !i st f !z =
+    sfoldlRangeBy_ (stepTagged st i) st f (f z (unTagged i))
 
   {-# INLINE sfoldrRangeIndices_ #-}
   {-# INLINE sfoldlRangeIndices_ #-}
   sfoldrRangeIndices_ i f z =
-    f (unTagged i) (sfoldrRangeIndices_ (nextTaggedI i) f z)
+    unTagged i `f` sfoldrRangeIndices_ (nextTaggedI i) f z
 
   sfoldlRangeIndices_ !i f !z =
     sfoldlRangeIndices_ (nextTaggedI i) f (f z (unTagged i))
+
+  {-# INLINE sfoldrRangeIndicesBy_ #-}
+  {-# INLINE sfoldlRangeIndicesBy_ #-}
+  sfoldrRangeIndicesBy_ i step f z =
+    unTagged i `f` sfoldrRangeIndicesBy_ (nextTaggedStep step i) step f z
+
+  sfoldlRangeIndicesBy_ !i step f !z =
+    sfoldlRangeIndicesBy_ (nextTaggedStep step i) step f $!
+    f z (unTagged i)
+
+{-# INLINE nextProxy #-}
+nextProxy :: Proxy (Succ n) -> Proxy n
+nextProxy _ = Proxy
 
 {-# INLINE nextTagged #-}
 nextTagged :: Dim a => Tagged (Succ n) a -> Tagged n a
 nextTagged (Tagged a) = Tagged (next a)
 
+{-# INLINE toPeano #-}
+toPeano :: Proxy a -> Proxy (ToPeano a)
+toPeano _ = Proxy
+
+{-# INLINE stepTagged #-}
+stepTagged :: (Dim a, Range step) => Proxy step -> Tagged (Succ n) a -> Tagged n a
+stepTagged step (Tagged a) = Tagged (stepBy step a)
+
 {-# INLINE nextTaggedI #-}
 nextTaggedI :: Tagged (Succ n) Int -> Tagged n Int
 nextTaggedI (Tagged a) = Tagged (a+1)
+
+{-# INLINE nextTaggedStep #-}
+nextTaggedStep :: Int -> Tagged (Succ n) Int -> Tagged n Int
+nextTaggedStep s (Tagged a) = Tagged (a+s)
 
 {-# INLINE tagPeano #-}
 tagPeano :: Dim n => n -> Tagged (ToPeano (Size n)) n
 tagPeano = Tagged
 
+{-# INLINE tagStep #-}
+tagStep :: Dim n => Proxy q -> Tagged (ToPeano q) n
+tagStep _ = Tagged zero
+
 {-# INLINE tagPeanoI #-}
 tagPeanoI :: proxy n -> Tagged (ToPeano (Size n)) Int
 tagPeanoI _ = Tagged 0
+
+{-# INLINE tagInt #-}
+tagInt :: proxy a -> Tagged (ToPeano a) Int
+tagInt _ = Tagged 0
 
 -- | Create a bound for use with e.g. "Data.Array.array"
 bounds :: (Dim a, Bounded a) => Proxy a -> (a, a)
