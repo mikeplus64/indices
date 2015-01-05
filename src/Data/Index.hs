@@ -74,8 +74,7 @@ module Data.Index
   , pdimHead, pdimTail
   , cnat
     -- ** Type families
-  , Half
-  , Divide
+  , DivideAll
   , Halves(..)
     -- * Syntax
   , dim, dimu, dimr
@@ -88,6 +87,8 @@ import           Data.Foldable             (Foldable)
 import qualified Data.Ix                   as Ix
 import           Data.Monoid               (Monoid (..))
 import           Data.Proxy
+import           Data.Type.Bool
+import           Data.Type.Nat
 import           Data.Tagged
 import           Data.Traversable          (Traversable)
 import           GHC.Generics
@@ -99,7 +100,7 @@ import           Language.Haskell.TH.Quote
 --
 -- The 'Applicative' and 'Monad' instances multiply in their bind operations,
 -- and their 'return'/'pure' creates an index whose first dimension is 1.
-data a :. b = {-# UNPACK #-} !Int :. !b
+data (a :: Nat) :. b = {-# UNPACK #-} !Int :. !b
   deriving (Show,Read,Eq,Ord,Generic,Functor,Foldable,Traversable)
 
 infixr 9 :.
@@ -107,7 +108,7 @@ infixr 9 :.
 {-# INLINE (.:) #-}
 -- | Construct an index. This ensures that all constructed indices are valid by
 -- taking the remainder. Negative indices go to 0.
-(.:) :: forall x xs. KnownNat x => Int -> xs -> x:.xs
+(.:) :: forall (x :: Nat) xs. KnownNat x => Int -> xs -> x :. xs
 (.:) x xs = (x `rem` cnat (Proxy :: Proxy x)) :. xs
 
 infixr 9 .:
@@ -638,32 +639,8 @@ pdimTail _ = Proxy
 class (Dim n, Range (ToPeano (Size n))) => Ranged n
 instance (Dim n, Range (ToPeano (Size n))) => Ranged n
 
--- | Peano numbers
-data Peano = Zero | Succ Peano
-
--- | Convert a 'Nat' to a type-level 'Peano'
-type family ToPeano' (n :: Nat) (acc :: Peano) :: Peano where
-  ToPeano' 0 acc = acc
-  ToPeano' n acc = ToPeano' (n - 1) (Succ acc)
-
-type ToPeano (n :: Nat) = ToPeano' n Zero
-
-type family FromPeano (n :: Peano) :: Nat where
-  FromPeano (Succ n) = 1 + FromPeano n
-  FromPeano Zero = 0
-
 --------------------------------------------------------------------------------
 -- Divide and conquer
-
-type family Half' (phx :: Nat) (hx :: Nat) (tx :: Nat) (x :: Nat) where
-  Half' hx' hx 0 x = hx' - 2 -- even
-  Half' hx' hx 1 x = hx' - 2 -- odd
-  Half' phx hx t x = Half' (phx+1) (phx*2) (x - hx) x
-
-type family Half (x :: Nat) where
-  Half 0 = 0
-  Half 1 = 0
-  Half n = Half' 0 0 2 n
 
 data Halves
   = -- | [lower, upper)
@@ -700,10 +677,10 @@ type family SplitsIfSizeGt1 (dim :: *) (s :: Nat) :: Halves where
   SplitsIfSizeGt1 dim     1 = One 0
   SplitsIfSizeGt1 (x:.xs) s = SplitAll (Split1 s)
 
-type Divide (dim :: *) = SplitsIfSizeGt1 dim (Size dim)
+type DivideAll (dim :: *) = SplitsIfSizeGt1 dim (Size dim)
 
 -- where...
-type Split1 size      = Split2 size (Half size)
+type Split1 size      = Split2 size (Quot size 2)
 type Split2 size half = Split 0 half size
 
 data Slice a = Slice
@@ -793,12 +770,12 @@ instance forall a b c.
 
 data DMode (dim :: *) where
   DRoll   :: Dim dim => DMode dim
-  DUnroll :: DivideAndConquer (Divide dim) => DMode dim
+  DUnroll :: DivideAndConquer (DivideAll dim) => DMode dim
 
 droll :: Dim dim => proxy dim -> DMode dim
 droll _ = DRoll
           
-dunroll :: (Divide dim ~ h, DivideAndConquer h) => proxy dim -> DMode dim
+dunroll :: (DivideAll dim ~ h, DivideAndConquer h) => proxy dim -> DMode dim
 dunroll _ = DUnroll
 
 {-# INLINE divideAndConquer #-}
@@ -808,7 +785,7 @@ divideAndConquer
   -> (Int -> f t)
   -> (Slice t -> Slice t -> f t)
   -> f t
-divideAndConquer   DUnroll f merge = dnc (Proxy :: Proxy (Divide dim)) f merge
+divideAndConquer   DUnroll f merge = dnc (Proxy :: Proxy (DivideAll dim)) f merge
 divideAndConquer m@DRoll   f merge = go s0 0 s0
  where
   s0 :: Int
@@ -829,17 +806,14 @@ divideAndConquer m@DRoll   f merge = go s0 0 s0
               Slice{ start = iM, thing = right , bound = iN }
 
 -- | Compute the size of an index
-type family Size (dim :: *) :: Nat where
-  Size (x:.xs) = x * Size xs
-  Size Z       = 1
+type family Size (dim :: k) :: Nat where
+  Size (x:.xs)  = x * Size xs
+  Size Z        = 1
+  Size (s::Nat) = s
 
 type family InRange (a :: *) (b :: *) :: Bool where
   InRange Z       Z       = True
-  InRange (x:.xs) (y:.ys) = And (x <=? y) (InRange xs ys)
-
-type family And (a :: Bool) (b :: Bool) :: Bool where
-  And True True = True
-  And a    b    = False
+  InRange (x:.xs) (y:.ys) = x <=? y && InRange xs ys
 
 class Range (n :: Peano) where
   sfoldrRange_ :: Dim o => Tagged n o -> (o -> b -> b) -> b -> b
