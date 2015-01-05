@@ -441,193 +441,6 @@ unsafeZipDims' f = unsafeZipDims (\_ a b -> f a b)
 mapMod :: Dim n => (Int -> Int) -> n -> n
 mapMod f = unsafeMapDim (\h a -> f a `rem` h)
 
-instance Num Z where
-  {-# INLINE (+) #-}
-  {-# INLINE (-) #-}
-  {-# INLINE (*) #-}
-  {-# INLINE negate #-}
-  {-# INLINE signum #-}
-  {-# INLINE abs #-}
-  {-# INLINE fromInteger #-}
-  _ + _         = Z
-  _ - _         = Z
-  _ * _         = Z
-  negate      _ = Z
-  signum      _ = Z
-  abs         _ = Z
-  fromInteger _ = Z
-
-instance Dim (x:.xs) => Num (x:.xs) where
-  {-# INLINE (+) #-}
-  {-# INLINE (-) #-}
-  {-# INLINE (*) #-}
-  {-# INLINE negate #-}
-  {-# INLINE signum #-}
-  {-# INLINE abs #-}
-  {-# INLINE fromInteger #-}
-  (+) = zipMod (+)
-  (-) = zipMod (-)
-  (*) = zipMod (*)
-  negate = mapMod negate
-  signum = mapMod signum
-  abs = mapMod abs
-  fromInteger = fromIndex . fromIntegral
-
-instance Real Z where
-  {-# INLINE toRational #-}
-  toRational _ = 0
-
-instance (Num (x:.xs), Dim (x:.xs)) => Real (x:.xs) where
-  {-# INLINE toRational #-}
-  toRational = toRational . toIndex
-
-instance Enum Z where
-  {-# INLINE toEnum #-}
-  {-# INLINE fromEnum #-}
-  {-# INLINE succ #-}
-  {-# INLINE pred #-}
-  {-# INLINE enumFromThen #-}
-  {-# INLINE enumFromTo #-}
-  {-# INLINE enumFromThenTo #-}
-  toEnum             0 = Z
-  toEnum             _ = error "toEnum: must be 0"
-  fromEnum           _ = 0
-  succ               _ = error "succ: Z"
-  pred               _ = error "pred: Z"
-  enumFrom           _ = [Z]
-  enumFromThen     _ _ = [Z]
-  enumFromTo       _ _ = [Z]
-  enumFromThenTo _ _ _ = [Z]
-
-instance Dim (x:.xs) => Enum (x:.xs) where
-  {-# INLINE toEnum #-}
-  {-# INLINE fromEnum #-}
-  {-# INLINE succ #-}
-  {-# INLINE pred #-}
-  {-# INLINE enumFromThen #-}
-  {-# INLINE enumFromTo #-}
-  {-# INLINE enumFromThenTo #-}
-  toEnum               = fromIndex
-  fromEnum             = toIndex
-
-  succ d
-    | d < lastDim Proxy = next d
-    | otherwise         = error "succ: index within bound"
-
-  pred d
-    | d > zero  = prev d
-    | otherwise = error "succ: index within bound"
-
-  enumFrom !l
-    | l < lastDim (proxyOf l) = l : enumFrom (next l)
-    | otherwise               = [l]
-
-  enumFromThen !l !j
-    | l < lastDim (proxyOf l) = l : enumFromThen (zipMod (+) l j) j
-    | otherwise               = [l]
-
-  enumFromTo !l !h
-    | l < h     = l : enumFromTo (next l) h
-    | otherwise = [h]
-
-instance Integral Z where
-  {-# INLINE div #-}
-  {-# INLINE mod #-}
-  {-# INLINE quot #-}
-  {-# INLINE rem #-}
-  {-# INLINE quotRem #-}
-  {-# INLINE divMod #-}
-  {-# INLINE toInteger #-}
-  div     _ _ = Z
-  mod     _ _ = Z
-  quot    _ _ = Z
-  rem     _ _ = Z
-  quotRem _ _ = (Z, Z)
-  divMod  _ _ = (Z, Z)
-  toInteger _ = 0
-
-instance (Integral xs, Dim (x:.xs), Enum (x:.xs)) => Integral (x:.xs) where
-  {-# INLINE div #-}
-  {-# INLINE mod #-}
-  {-# INLINE quot #-}
-  {-# INLINE rem #-}
-  {-# INLINE quotRem #-}
-  {-# INLINE divMod #-}
-  {-# INLINE toInteger #-}
-  div  = unsafeZipDims' div
-  mod  = unsafeZipDims' mod
-  quot = unsafeZipDims' quot
-  rem  = unsafeZipDims' rem
-  quotRem xs ys = (quot xs ys, rem xs ys)
-  divMod  xs ys = (div xs ys, mod xs ys)
-  toInteger = toInteger . toIndex
-
-instance Bounded Z where
-  {-# INLINE minBound #-}
-  {-# INLINE maxBound #-}
-  minBound = Z
-  maxBound = Z
-
--- it would be nice to write this in terms of 'Dim', but since 'Dim' requires
--- 'Bounded', the recursion confuses GHC's optimiser which leads to cruddy code
--- everywhere involving 'Dim'.
-instance forall x xs. (KnownNat x, Bounded xs) => Bounded (x:.xs) where
-  {-# INLINE minBound #-}
-  {-# INLINE maxBound #-}
-  minBound = 0 :. minBound
-  maxBound = (cnat (Proxy :: Proxy x)-1) :. maxBound
-
-instance Monoid Z where
-  {-# INLINE mempty #-}
-  {-# INLINE mappend #-}
-  mempty      = Z
-  mappend _ _ = Z
-
-instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
-  {-# INLINE mempty #-}
-  {-# INLINE mappend #-}
-  mempty  = zero
-  mappend = (+)
-
-instance KnownNat s => Applicative ((:.) s) where
-  {-# INLINE pure #-}
-  {-# INLINE (<*>) #-}
-  {-# INLINE (*>) #-}
-  {-# INLINE (<*) #-}
-  pure x                    = 1:.x
-  d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `rem` dimHead d) :. f x
-  (*>)                      = (>>)
-  (<*)                      = flip (>>)
-
-instance KnownNat s => Monad ((:.) s) where
-  {-# INLINE return #-}
-  {-# INLINE (>>=) #-}
-  return x              = 1:.x
-  d@(ix0:.a) >>= f      = case f a of
-    ix1 :. b -> ((ix0*ix1) `rem` dimHead d) :. b
-
-instance Ix.Ix Z where
-  {-# INLINE range #-}
-  {-# INLINE index #-}
-  {-# INLINE inRange #-}
-  {-# INLINE rangeSize #-}
-  range _ = [Z]
-  index   _ _ = 0
-  inRange _ _ = True
-  rangeSize _ = 0
-
--- | The indices in an Ix instance are always bound by (0, t), where t is the
--- type of the index.
-instance (Ranged (x:.xs), Num xs) => Ix.Ix (x:.xs) where
-  {-# INLINE range #-}
-  {-# INLINE index #-}
-  {-# INLINE inRange #-}
-  {-# INLINE rangeSize #-}
-  range _         = range Unroll
-  index _       c = toIndex c
-  inRange _     c = minBound <= c && c <= maxBound
-  rangeSize (_,b) = size (proxyOf b)
-
 dimQQ :: ExpQ -> TypeQ -> QuasiQuoter
 dimQQ val ty =  QuasiQuoter
   { quoteExp  = \s -> [| $val :: $(quoteType (dimQQ val ty) s) |]
@@ -914,4 +727,194 @@ bounds _ = (zero, maxBound)
 -- | @ fromInteger . natVal @
 cnat :: KnownNat n => proxy (n :: Nat) -> Int
 cnat = fromInteger . natVal
+
+--------------------------------------------------------------------------------
+-- Instances
+
+instance Num Z where
+  {-# INLINE (+) #-}
+  {-# INLINE (-) #-}
+  {-# INLINE (*) #-}
+  {-# INLINE negate #-}
+  {-# INLINE signum #-}
+  {-# INLINE abs #-}
+  {-# INLINE fromInteger #-}
+  _ + _         = Z
+  _ - _         = Z
+  _ * _         = Z
+  negate      _ = Z
+  signum      _ = Z
+  abs         _ = Z
+  fromInteger _ = Z
+
+instance Dim (x:.xs) => Num (x:.xs) where
+  {-# INLINE (+) #-}
+  {-# INLINE (-) #-}
+  {-# INLINE (*) #-}
+  {-# INLINE negate #-}
+  {-# INLINE signum #-}
+  {-# INLINE abs #-}
+  {-# INLINE fromInteger #-}
+  (+) = zipMod (+)
+  (-) = zipMod (-)
+  (*) = zipMod (*)
+  negate = mapMod negate
+  signum = mapMod signum
+  abs = mapMod abs
+  fromInteger = fromIndex . fromIntegral
+
+instance Real Z where
+  {-# INLINE toRational #-}
+  toRational _ = 0
+
+instance (Num (x:.xs), Dim (x:.xs)) => Real (x:.xs) where
+  {-# INLINE toRational #-}
+  toRational = toRational . toIndex
+
+instance Enum Z where
+  {-# INLINE toEnum #-}
+  {-# INLINE fromEnum #-}
+  {-# INLINE succ #-}
+  {-# INLINE pred #-}
+  {-# INLINE enumFromThen #-}
+  {-# INLINE enumFromTo #-}
+  {-# INLINE enumFromThenTo #-}
+  toEnum             0 = Z
+  toEnum             _ = error "toEnum: must be 0"
+  fromEnum           _ = 0
+  succ               _ = error "succ: Z"
+  pred               _ = error "pred: Z"
+  enumFrom           _ = [Z]
+  enumFromThen     _ _ = [Z]
+  enumFromTo       _ _ = [Z]
+  enumFromThenTo _ _ _ = [Z]
+
+instance Dim (x:.xs) => Enum (x:.xs) where
+  {-# INLINE toEnum #-}
+  {-# INLINE fromEnum #-}
+  {-# INLINE succ #-}
+  {-# INLINE pred #-}
+  {-# INLINE enumFromThen #-}
+  {-# INLINE enumFromTo #-}
+  {-# INLINE enumFromThenTo #-}
+  toEnum               = fromIndex
+  fromEnum             = toIndex
+
+  succ d
+    | d < lastDim Proxy = next d
+    | otherwise         = error "succ: index within bound"
+
+  pred d
+    | d > zero  = prev d
+    | otherwise = error "succ: index within bound"
+
+  enumFrom !l
+    | l < lastDim (proxyOf l) = l : enumFrom (next l)
+    | otherwise               = [l]
+
+  enumFromThen !l !j
+    | l < lastDim (proxyOf l) = l : enumFromThen (zipMod (+) l j) j
+    | otherwise               = [l]
+
+  enumFromTo !l !h
+    | l < h     = l : enumFromTo (next l) h
+    | otherwise = [h]
+
+instance Integral Z where
+  {-# INLINE div #-}
+  {-# INLINE mod #-}
+  {-# INLINE quot #-}
+  {-# INLINE rem #-}
+  {-# INLINE quotRem #-}
+  {-# INLINE divMod #-}
+  {-# INLINE toInteger #-}
+  div     _ _ = Z
+  mod     _ _ = Z
+  quot    _ _ = Z
+  rem     _ _ = Z
+  quotRem _ _ = (Z, Z)
+  divMod  _ _ = (Z, Z)
+  toInteger _ = 0
+
+instance (Integral xs, Dim (x:.xs), Enum (x:.xs)) => Integral (x:.xs) where
+  {-# INLINE div #-}
+  {-# INLINE mod #-}
+  {-# INLINE quot #-}
+  {-# INLINE rem #-}
+  {-# INLINE quotRem #-}
+  {-# INLINE divMod #-}
+  {-# INLINE toInteger #-}
+  div  = unsafeZipDims' div
+  mod  = unsafeZipDims' mod
+  quot = unsafeZipDims' quot
+  rem  = unsafeZipDims' rem
+  quotRem xs ys = (quot xs ys, rem xs ys)
+  divMod  xs ys = (div xs ys, mod xs ys)
+  toInteger = toInteger . toIndex
+
+instance Bounded Z where
+  {-# INLINE minBound #-}
+  {-# INLINE maxBound #-}
+  minBound = Z
+  maxBound = Z
+
+-- it would be nice to write this in terms of 'Dim', but since 'Dim' requires
+-- 'Bounded', the recursion confuses GHC's optimiser which leads to cruddy code
+-- everywhere involving 'Dim'.
+instance forall x xs. (KnownNat x, Bounded xs) => Bounded (x:.xs) where
+  {-# INLINE minBound #-}
+  {-# INLINE maxBound #-}
+  minBound = 0 :. minBound
+  maxBound = (cnat (Proxy :: Proxy x)-1) :. maxBound
+
+instance Monoid Z where
+  {-# INLINE mempty #-}
+  {-# INLINE mappend #-}
+  mempty      = Z
+  mappend _ _ = Z
+
+instance (Dim (x:.xs), Monoid xs) => Monoid (x:.xs) where
+  {-# INLINE mempty #-}
+  {-# INLINE mappend #-}
+  mempty  = zero
+  mappend = (+)
+
+instance KnownNat s => Applicative ((:.) s) where
+  {-# INLINE pure #-}
+  {-# INLINE (<*>) #-}
+  {-# INLINE (*>) #-}
+  {-# INLINE (<*) #-}
+  pure x                    = 1:.x
+  d@(ix0 :. f) <*> ix1 :. x = ((ix0*ix1) `rem` dimHead d) :. f x
+  (*>)                      = (>>)
+  (<*)                      = flip (>>)
+
+instance KnownNat s => Monad ((:.) s) where
+  {-# INLINE return #-}
+  {-# INLINE (>>=) #-}
+  return x              = 1:.x
+  d@(ix0:.a) >>= f      = case f a of
+    ix1 :. b -> ((ix0*ix1) `rem` dimHead d) :. b
+
+instance Ix.Ix Z where
+  {-# INLINE range #-}
+  {-# INLINE index #-}
+  {-# INLINE inRange #-}
+  {-# INLINE rangeSize #-}
+  range _ = [Z]
+  index   _ _ = 0
+  inRange _ _ = True
+  rangeSize _ = 0
+
+-- | The indices in an Ix instance are always bound by (0, t), where t is the
+-- type of the index.
+instance (Ranged (x:.xs), Num xs) => Ix.Ix (x:.xs) where
+  {-# INLINE range #-}
+  {-# INLINE index #-}
+  {-# INLINE inRange #-}
+  {-# INLINE rangeSize #-}
+  range _         = range Unroll
+  index _       c = toIndex c
+  inRange _     c = minBound <= c && c <= maxBound
+  rangeSize (_,b) = size (proxyOf b)
 
