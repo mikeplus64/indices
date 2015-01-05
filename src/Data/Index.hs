@@ -348,8 +348,12 @@ unrollBy
 unrollBy step _ = UnrollBy (Proxy :: Proxy step) Proxy
 
 {-# INLINE roll #-}
-roll :: Dim a => Proxy a -> Mode a
+-- | You might prefer to use 'dimr'
+roll :: Dim a => proxy a -> Mode a
 roll _ = Roll
+
+rollBy :: Dim a => Int -> proxy a -> Mode a
+rollBy s _ = RollBy s
 
 {-# INLINE modeProxy #-}
 modeProxy :: Mode a -> Proxy a
