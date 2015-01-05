@@ -1,6 +1,14 @@
+1.8.0
+-----
+* Support stepped computations
+* Introduce Data.Type.Nat, which provides some Nat operations not found in
+  GHC.TypeLits
+* Some cleanup
+
 1.7.0
 -----
-* Ensure things get inlined by removing recursive dependencies between 'Dim' and 'Bounded'
+* Ensure things get inlined by removing recursive dependencies between 'Dim'
+  and 'Bounded'
 * Remove value-level :.
 * Add .: for safe construction of indices
 

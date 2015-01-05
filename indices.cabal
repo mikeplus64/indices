@@ -1,5 +1,5 @@
 name:                indices
-version:             1.7.1
+version:             1.8.0
 synopsis:            Multi-dimensional statically bounded indices.
 description:         
     Multi-dimensional statically bounded indices, with operations that unroll.
