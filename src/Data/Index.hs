@@ -44,7 +44,7 @@ module Data.Index
   , Rank(..)
   , (:.)(..), (.:), dimHead, dimTail, Z(..)
     -- * Selecting whether to unroll loops
-  , Mode(..), roll, unroll, modeProxy
+  , Mode(..), unroll, unrollBy, roll, rollBy, modeProxy
     -- * Using ranges
   , foldlRange
   , foldrRange
@@ -304,15 +304,49 @@ instance (KnownNat x, Dim xs) => Dim (x:.xs) where
 -- | Select whether to generate an unrolled loop or just the loop at
 -- compile-time.
 data Mode :: * -> * where
-  Unroll :: Ranged i => Mode i
+  -- | Unroll a loop.
+  Unroll   :: Ranged i => Mode i
+  -- | Unroll a loop by a specific step.
+  UnrollBy
+    :: ( '(quot , rem) ~ QuotRem (Size dim) step, rem ~ 0
+       , Range (ToPeano quot), Range (ToPeano step)
+       , KnownNat step
+       , Dim dim)
+    => Proxy step 
+    -> Proxy quot 
+    -> Mode dim
+
+  -- | Roll a loop.
   Roll   :: Dim i => Mode i
 
--- | You might prefer to use 'dimu'
+  -- | Roll a loop by a specific step.
+  RollBy :: Dim i => {-# UNPACK #-} !Int -> Mode i
+
+deriving instance Show (Mode a)
+
+step2 :: Proxy 2
+step2 = Proxy
+
+step4 :: Proxy 4
+step4 = Proxy
+
 {-# INLINE unroll #-}
-unroll :: Ranged a => Proxy a -> Mode a
+-- | You might prefer to use 'dimu'
+unroll :: Ranged a => proxy a -> Mode a
 unroll _ = Unroll
 
--- | You might prefer to use 'dimr'
+{-# INLINE unrollBy #-}
+unrollBy 
+  :: forall proxys proxy quot rem dim step.
+     ( '(quot , rem) ~ QuotRem (Size dim) step, rem ~ 0
+     , Range (ToPeano quot), Range (ToPeano step)
+     , KnownNat step
+     , Dim dim)
+  => proxys step
+  -> proxy dim
+  -> Mode dim
+unrollBy step _ = UnrollBy (Proxy :: Proxy step) Proxy
+
 {-# INLINE roll #-}
 roll :: Dim a => Proxy a -> Mode a
 roll _ = Roll
@@ -329,6 +363,12 @@ range mode = foldrRange mode (:) []
 {-# INLINE proxyOf #-}
 proxyOf :: a -> Proxy a
 proxyOf = const Proxy
+
+{-# INLINE nextN #-}
+nextN :: Dim a => Int -> a -> a
+nextN n dim
+  | n > 0     = nextN (n-1) (next dim)
+  | otherwise = dim
 
 {-# INLINE foldrRange #-}
 -- | Lazy right fold over a range.
